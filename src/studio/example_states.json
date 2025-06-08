@@ -1,0 +1,119 @@
+{
+  "example_states": [
+    {
+      "name": "Vegetarian High Protein",
+      "description": "User wants vegetarian meals with high protein for muscle building",
+      "state": {
+        "messages": [
+          {
+            "type": "human",
+            "content": "I'm vegetarian and trying to build muscle. I need about 2200 calories per day with high protein."
+          }
+        ],
+        "current_meal_plan": {},
+        "user_profile": {
+          "dietary_preferences": ["vegetarian"],
+          "goals": ["muscle_building", "high_protein"],
+          "daily_calories": 2200
+        },
+        "food_database": {},
+        "conversation_phase": "gathering_info",
+        "optimization_history": []
+      }
+    },
+    {
+      "name": "Low Carb Weight Loss",
+      "description": "User on low-carb diet for weight loss",
+      "state": {
+        "messages": [
+          {
+            "type": "human",
+            "content": "I'm trying to lose weight with a low-carb diet. Target is 1600 calories with less than 100g carbs per day."
+          }
+        ],
+        "current_meal_plan": {},
+        "user_profile": {
+          "dietary_preferences": ["low_carb"],
+          "goals": ["weight_loss"],
+          "daily_calories": 1600,
+          "carb_limit": 100
+        },
+        "food_database": {},
+        "conversation_phase": "gathering_info",
+        "optimization_history": []
+      }
+    },
+    {
+      "name": "Quick Meals Busy Professional",
+      "description": "Busy person needing quick, healthy meals",
+      "state": {
+        "messages": [
+          {
+            "type": "human",
+            "content": "I'm super busy and need meals that take less than 15 minutes to prepare. Around 1800 calories."
+          }
+        ],
+        "current_meal_plan": {},
+        "user_profile": {
+          "constraints": ["quick_prep"],
+          "prep_time_max": 15,
+          "daily_calories": 1800
+        },
+        "food_database": {},
+        "conversation_phase": "gathering_info",
+        "optimization_history": []
+      }
+    },
+    {
+      "name": "Athlete Performance",
+      "description": "Athlete needing high-calorie performance nutrition",
+      "state": {
+        "messages": [
+          {
+            "type": "human",
+            "content": "I'm training for a marathon. Need 3000 calories with good carb loading."
+          }
+        ],
+        "current_meal_plan": {},
+        "user_profile": {
+          "activity_level": "very_active",
+          "goals": ["performance", "endurance"],
+          "daily_calories": 3000
+        },
+        "food_database": {},
+        "conversation_phase": "gathering_info",
+        "optimization_history": []
+      }
+    },
+    {
+      "name": "Meal Optimization Request",
+      "description": "User with existing meal wanting optimization",
+      "state": {
+        "messages": [
+          {
+            "type": "human",
+            "content": "I have a breakfast with Greek yogurt, berries, and almonds. Can you optimize it to have at least 35g of protein?"
+          }
+        ],
+        "current_meal_plan": {
+          "breakfast": {
+            "id": "breakfast1",
+            "name": "Morning Protein Bowl",
+            "meal_type": "breakfast",
+            "foods": {
+              "greek_yogurt": 1,
+              "berries": 0.5,
+              "almonds": 0.25
+            }
+          }
+        },
+        "user_profile": {
+          "goals": ["high_protein"]
+        },
+        "food_database": {},
+        "conversation_phase": "optimizing",
+        "optimization_history": []
+      }
+    }
+  ]
+} 
