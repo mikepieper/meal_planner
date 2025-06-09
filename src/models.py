@@ -1,18 +1,7 @@
-from typing import Dict, List, Optional, Literal
+from typing import TypedDict, List, Dict, Any, Optional, Literal, Annotated, Sequence
 from pydantic import BaseModel, Field
-from langgraph.graph import MessagesState
-
-
-# ========== State Definitions ==========
-
-class MealPlannerState(TypedDict):
-    """Main state for the meal planning agent."""
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    current_meal_plan: MealPlan
-    user_profile: Dict[str, Any]  # dietary restrictions, preferences, nutrition goals
-    food_database: Dict[str, FoodItem]
-    conversation_phase: str
-    optimization_history: List[Dict[str, Any]]
+from langgraph.graph import MessagesState, add_messages
+from langchain_core.messages import BaseMessage
 
 
 # ========== Pydantic Models ==========
@@ -89,3 +78,25 @@ class MealPlan(BaseModel):
                     totals[nutrient] += value
         
         return totals
+
+class UserProfile(BaseModel):
+    """User profile containing preferences and nutrition information."""
+    daily_calories: Optional[int] = Field(None, description="Daily caloric target if specified")
+    diet_type: Optional[str] = Field("balanced", description="Diet type: balanced, high_protein, low_carb, etc.")
+    dietary_restrictions: List[str] = Field(default_factory=list, description="Allergies, intolerances, preferences")
+    nutrition_goals: Optional[ConstraintSet] = Field(None, description="Calculated nutrition constraints")
+    automation_preference: Optional[Literal["manual", "assisted", "automated"]] = Field(
+        None, 
+        description="User's preference for meal planning assistance level"
+    )
+
+# ========== State Definitions ==========
+
+class MealPlannerState(TypedDict):
+    """Main state for the meal planning agent."""
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    current_meal_plan: MealPlan
+    user_profile: UserProfile  # dietary restrictions, preferences, nutrition goals
+    food_database: Dict[str, FoodItem]
+    conversation_phase: str
+    optimization_history: List[Dict[str, Any]]
