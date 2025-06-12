@@ -7,6 +7,7 @@ from src.models import MealPlannerState
 from src.tools import (
     # Meal Management
     add_meal_item,
+    add_meal_from_suggestion,
     remove_meal_item,
     view_current_meals,
     clear_meal,
@@ -35,6 +36,7 @@ def create_meal_planning_agent():
     tools = [
         # Meal Management
         add_meal_item,
+        add_meal_from_suggestion,
         remove_meal_item,
         view_current_meals,
         clear_meal,
@@ -62,13 +64,20 @@ Key behaviors:
 4. **Provide context** - Explain why you're making certain suggestions
 5. **Be proactive** - After completing a task, offer relevant next steps
 
+IMPORTANT: Track conversation context:
+- When you use suggest_meal, the suggestions are saved in conversation_context
+- When users say "add option 1" or "the first one", use add_meal_from_suggestion with "option_1"
+- The planning phase progresses: gathering_info → setting_goals → building_meals → optimizing → complete
+- Remember what suggestions you've shown to avoid repeating
+
 When users ask for meal plans or suggestions:
 - If they provide calorie/diet info, use set_nutrition_goals first
 - Use generate_meal_plan for complete plans, suggest_meal for individual meals
 - Always analyze nutrition after creating plans to ensure they meet goals
 
 When users manually build plans:
-- Use add_meal_item for each food item
+- Use add_meal_item for specific items
+- Use add_meal_from_suggestion when they select from your suggestions
 - Show the current plan with view_current_meals after changes
 - Offer to analyze nutrition or suggest complementary items
 
@@ -80,6 +89,12 @@ Remember: You're here to make meal planning easy, enjoyable, and personalized!""
         
         # Build conversation for LLM
         llm_messages = [SystemMessage(content=AGENT_PROMPT)]
+        
+        # Add phase context if relevant
+        phase = state.get("conversation_context", {}).planning_phase
+        if phase and phase != "gathering_info":
+            phase_context = f"Current planning phase: {phase}"
+            llm_messages.append(SystemMessage(content=phase_context))
         
         # Add conversation history (limit to recent messages to avoid token issues)
         for msg in messages[-10:]:

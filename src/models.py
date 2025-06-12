@@ -68,6 +68,41 @@ class UserProfile(BaseModel):
     health_goals: List[str] = Field(default_factory=list, description="Weight loss, muscle gain, etc.")
 
 
+class MealSuggestion(BaseModel):
+    """A suggested meal with items and nutrition info."""
+    name: str = Field(..., description="Name of the meal suggestion")
+    items: List[MealItem] = Field(default_factory=list, description="Items in this meal")
+    nutrition: NutritionInfo = Field(default_factory=NutritionInfo, description="Nutritional content")
+    description: Optional[str] = Field(None, description="Brief description")
+
+
+class ConversationContext(BaseModel):
+    """Tracks conversation state and memory."""
+    # Suggestions presented to user
+    last_suggestions: Dict[str, Dict[str, MealSuggestion]] = Field(
+        default_factory=dict, 
+        description="Last suggestions shown for each meal type"
+    )
+    
+    # Planning phase tracking
+    planning_phase: Literal["gathering_info", "setting_goals", "building_meals", "optimizing", "complete"] = Field(
+        "gathering_info",
+        description="Current phase of meal planning"
+    )
+    
+    # User preferences mentioned in conversation
+    mentioned_preferences: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Preferences mentioned during conversation"
+    )
+    
+    # Meal templates from successful combinations
+    saved_templates: Dict[str, MealSuggestion] = Field(
+        default_factory=dict,
+        description="Saved meal templates for reuse"
+    )
+
+
 # ========== State Definition ==========
 
 class MealPlannerState(TypedDict):
@@ -84,8 +119,8 @@ class MealPlannerState(TypedDict):
     user_profile: UserProfile
     nutrition_goals: Optional[NutritionGoals]
     
-    # Conversation tracking
-    conversation_context: Dict[str, Any]
+    # Enhanced conversation tracking
+    conversation_context: ConversationContext
     
     # Current meal being edited (for context)
     current_meal: Literal["breakfast", "lunch", "dinner", "snacks"]
@@ -101,6 +136,6 @@ def create_initial_state() -> MealPlannerState:
         "snacks": [],
         "user_profile": UserProfile(),
         "nutrition_goals": None,
-        "conversation_context": {},
+        "conversation_context": ConversationContext(),
         "current_meal": "breakfast"
     }

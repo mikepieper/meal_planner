@@ -8,7 +8,7 @@ from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
-from src.models import MealPlannerState, MealItem, NutritionInfo, NutritionGoals
+from src.models import MealPlannerState, MealItem, NutritionInfo, NutritionGoals, MealSuggestion, ConversationContext
 
 # Initialize LLM for generation tools
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
@@ -36,6 +36,42 @@ def add_meal_item(
             "current_meal": meal_type
         },
         # The message will be automatically added to the messages list
+    )
+
+
+@tool
+def add_meal_from_suggestion(
+    meal_type: Literal["breakfast", "lunch", "dinner", "snacks"],
+    suggestion_key: str,
+    state: Annotated[MealPlannerState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Add a complete suggested meal using its key (e.g., 'option_1')."""
+    context = state["conversation_context"]
+    
+    # Get the suggestion from conversation context
+    if meal_type not in context.last_suggestions:
+        return Command(update={})  # No suggestions for this meal type
+    
+    if suggestion_key not in context.last_suggestions[meal_type]:
+        return Command(update={})  # Invalid suggestion key
+    
+    suggestion = context.last_suggestions[meal_type][suggestion_key]
+    
+    # Add all items from the suggestion
+    updated_meal = state[meal_type] + suggestion.items
+    
+    # Update planning phase if we're starting to build meals
+    new_context = context.model_copy()
+    if new_context.planning_phase == "setting_goals":
+        new_context.planning_phase = "building_meals"
+    
+    return Command(
+        update={
+            meal_type: updated_meal,
+            "current_meal": meal_type,
+            "conversation_context": new_context
+        }
     )
 
 
@@ -159,9 +195,15 @@ def set_nutrition_goals(
         fat_target=daily_calories * fat_percent / 9          # 9 cal/g fat
     )
     
+    # Update conversation phase
+    context = state["conversation_context"]
+    new_context = context.model_copy()
+    new_context.planning_phase = "setting_goals"
+    
     return Command(
         update={
-            "nutrition_goals": goals
+            "nutrition_goals": goals,
+            "conversation_context": new_context
         }
     )
 
@@ -273,6 +315,11 @@ For each meal, format as a JSON list of items:
     
     response = llm.invoke(prompt)
     
+    # Update conversation phase
+    conv_context = state["conversation_context"]
+    new_context = conv_context.model_copy()
+    new_context.planning_phase = "building_meals"
+    
     try:
         # Parse the LLM response to extract meal items
         import re
@@ -281,7 +328,7 @@ For each meal, format as a JSON list of items:
             meal_data = json.loads(json_match.group())
             
             # Convert to MealItem objects
-            updates = {}
+            updates = {"conversation_context": new_context}
             for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
                 if meal_type in meal_data:
                     items = []
@@ -306,7 +353,8 @@ For each meal, format as a JSON list of items:
             "breakfast": [],
             "lunch": [],
             "dinner": [],
-            "snacks": []
+            "snacks": [],
+            "conversation_context": new_context
         }
     )
 
@@ -317,7 +365,7 @@ def suggest_meal(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
     preferences: Optional[Dict[str, Any]] = None
-) -> str:
+) -> Command:
     """Suggest options for a specific meal based on preferences."""
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
@@ -338,11 +386,76 @@ def suggest_meal(
     
     prompt = f"""{context}
 
-Provide 3 {meal_type} suggestions with specific portions that would work well.
-Format each option clearly with a name and list of ingredients with amounts."""
+Provide 3 {meal_type} suggestions in JSON format with specific portions:
+{{
+    "option_1": {{
+        "name": "Meal Name",
+        "description": "Brief description",
+        "items": [
+            {{"food": "item1", "amount": "1", "unit": "cup"}},
+            {{"food": "item2", "amount": "2", "unit": "oz"}}
+        ],
+        "nutrition": {{
+            "calories": 450,
+            "protein": 25,
+            "carbohydrates": 50,
+            "fat": 15
+        }}
+    }},
+    "option_2": {{...}},
+    "option_3": {{...}}
+}}"""
     
     response = llm.invoke(prompt)
-    return f"{meal_type.capitalize()} suggestions:\n\n{response.content}"
+    
+    # Parse response and save suggestions in conversation context
+    conv_context = state["conversation_context"]
+    new_context = conv_context.model_copy()
+    
+    try:
+        import re
+        json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+        if json_match:
+            suggestions_data = json.loads(json_match.group())
+            
+            # Convert to MealSuggestion objects and save in context
+            new_context.last_suggestions[meal_type] = {}
+            
+            for key, data in suggestions_data.items():
+                if key.startswith("option_"):
+                    items = []
+                    for item_data in data.get("items", []):
+                        items.append(MealItem(
+                            food=item_data["food"],
+                            amount=item_data["amount"],
+                            unit=item_data.get("unit", "serving")
+                        ))
+                    
+                    nutrition = NutritionInfo(
+                        calories=data["nutrition"]["calories"],
+                        protein=data["nutrition"]["protein"],
+                        carbohydrates=data["nutrition"]["carbohydrates"],
+                        fat=data["nutrition"]["fat"]
+                    )
+                    
+                    suggestion = MealSuggestion(
+                        name=data["name"],
+                        items=items,
+                        nutrition=nutrition,
+                        description=data.get("description", "")
+                    )
+                    
+                    new_context.last_suggestions[meal_type][key] = suggestion
+    except:
+        # If parsing fails, still update context to clear old suggestions
+        new_context.last_suggestions[meal_type] = {}
+    
+    # Return the conversation context update and the formatted response
+    return Command(
+        update={
+            "conversation_context": new_context
+        }
+    )
 
 
 # === UTILITY TOOLS ===
