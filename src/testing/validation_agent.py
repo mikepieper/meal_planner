@@ -70,15 +70,24 @@ def create_validation_agent():
         
         scenario = state.scenario
         conversation = state.conversation
+        user_state = state.user_state
+        
+        # Check if this is a trajectory evaluation (hit max turns without completion)
+        is_trajectory_eval = (user_state.turn_count >= scenario.max_turns and 
+                            not user_state.goal_achieved and
+                            "trajectory" in scenario.scenario_id)
         
         prompt = f"""Analyze this conversation to determine goal achievement.
 
 SCENARIO: {scenario.scenario_id}
 USER GOAL: {scenario.goal.value}
 SPECIFIC REQUIREMENTS: {json.dumps(scenario.specific_requirements, indent=2)}
+TURN COUNT: {user_state.turn_count}/{scenario.max_turns}
 
 SUCCESS CRITERIA:
 {chr(10).join(f"- {criterion}" for criterion in scenario.success_criteria)}
+
+{"TRAJECTORY EVALUATION MODE: Task incomplete due to turn limit. Evaluate PROGRESS and EFFICIENCY instead of completion." if is_trajectory_eval else ""}
 
 CONVERSATION:
 {format_conversation(conversation)}
@@ -87,6 +96,7 @@ Analyze each success criterion and determine:
 1. Was it met? (true/false)
 2. If not, what was missing?
 3. Overall goal achievement score (0-1)
+{f"4. For trajectory eval: Score based on (a) clear progress each turn, (b) no circular conversations, (c) efficient path toward goal" if is_trajectory_eval else ""}
 
 Respond in JSON format:
 {{
@@ -96,7 +106,9 @@ Respond in JSON format:
         "criterion_name": true/false
     }},
     "missing_criteria": ["list of unmet criteria"],
-    "analysis": "Brief explanation"
+    "analysis": "Brief explanation",
+    "trajectory_score": 0.0-1.0 (if trajectory evaluation),
+    "progress_notes": "explanation of progress made"
 }}"""
 
         response = llm.invoke([SystemMessage(content=prompt)])

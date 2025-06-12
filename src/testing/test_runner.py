@@ -9,6 +9,12 @@ import langsmith
 from langsmith import traceable
 
 from src.testing.test_scenarios import TestScenario, get_scenario_by_id, get_all_scenario_ids
+
+# Import simple scenarios if available
+try:
+    from src.testing.simple_test_scenarios import get_simple_scenario_by_id
+except ImportError:
+    get_simple_scenario_by_id = None
 from src.testing.user_agent import user_agent, initialize_user_state, UserAgentState
 from src.testing.validation_agent import validation_agent, ValidationState, save_validation_report, ValidationReport
 from src.agent import graph as meal_planning_graph
@@ -31,8 +37,12 @@ class TestRunner:
     async def run_single_test(self, scenario_id: str) -> ValidationReport:
         """Run a single test scenario."""
         
-        # Get scenario
-        scenario = get_scenario_by_id(scenario_id)
+        # Get scenario - try simple scenarios first, then regular
+        scenario = None
+        if get_simple_scenario_by_id:
+            scenario = get_simple_scenario_by_id(scenario_id)
+        if not scenario:
+            scenario = get_scenario_by_id(scenario_id)
         if not scenario:
             raise ValueError(f"Scenario '{scenario_id}' not found")
         
