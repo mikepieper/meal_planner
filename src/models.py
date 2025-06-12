@@ -1,6 +1,6 @@
 from typing import TypedDict, List, Dict, Any, Optional, Literal, Annotated, Sequence
 from pydantic import BaseModel, Field
-from langgraph.graph import MessagesState, add_messages
+from langgraph.graph import add_messages
 from langchain_core.messages import BaseMessage
 
 
@@ -80,22 +80,22 @@ class ConversationContext(BaseModel):
     """Tracks conversation state and memory."""
     # Suggestions presented to user
     last_suggestions: Dict[str, Dict[str, MealSuggestion]] = Field(
-        default_factory=dict, 
+        default_factory=dict,
         description="Last suggestions shown for each meal type"
     )
-    
+
     # Planning phase tracking
     planning_phase: Literal["gathering_info", "setting_goals", "building_meals", "optimizing", "complete"] = Field(
         "gathering_info",
         description="Current phase of meal planning"
     )
-    
+
     # User preferences mentioned in conversation
     mentioned_preferences: Dict[str, Any] = Field(
         default_factory=dict,
         description="Preferences mentioned during conversation"
     )
-    
+
     # Meal templates from successful combinations
     saved_templates: Dict[str, MealSuggestion] = Field(
         default_factory=dict,
@@ -108,23 +108,23 @@ class ConversationContext(BaseModel):
 class MealPlannerState(TypedDict):
     """Main state for the meal planning agent - simplified version."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    
+
     # Simple meal storage - just lists of MealItems
     breakfast: List[MealItem]
-    lunch: List[MealItem] 
+    lunch: List[MealItem]
     dinner: List[MealItem]
     snacks: List[MealItem]
-    
+
     # User information
     user_profile: UserProfile
     nutrition_goals: Optional[NutritionGoals]
-    
+
     # Enhanced conversation tracking
     conversation_context: ConversationContext
-    
+
     # Current meal being edited (for context)
     current_meal: Literal["breakfast", "lunch", "dinner", "snacks"]
-    
+
     # Running nutrition totals
     current_totals: Optional[NutritionInfo]
 

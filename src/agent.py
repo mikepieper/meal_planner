@@ -29,14 +29,15 @@ from src.tools import (
     generate_shopping_list
 )
 
+
 # ====== SIMPLIFIED REACT AGENT ======
 
 def create_meal_planning_agent():
     """Single ReAct agent that handles all meal planning tasks."""
-    
+
     # Initialize LLM
     llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
-    
+
     # All available tools
     tools = [
         # Meal Management
@@ -62,10 +63,11 @@ def create_meal_planning_agent():
         # Utility
         generate_shopping_list
     ]
-    
+
     llm_with_tools = llm.bind_tools(tools)
-    
-    AGENT_PROMPT = """You are a friendly and knowledgeable meal planning assistant. Your goal is to help users create personalized, nutritious meal plans that fit their preferences and dietary needs.
+
+    AGENT_PROMPT = """You are a friendly and knowledgeable meal planning assistant.
+Your goal is to help users create personalized, nutritious meal plans that fit their preferences and dietary needs.
 
 Key behaviors:
 1. **Be conversational and helpful** - Act like a knowledgeable friend, not a robot
@@ -90,7 +92,7 @@ NUTRITION TRACKING:
 CONVERSATION FLOW MANAGEMENT:
 Based on the current phase, guide the conversation appropriately:
 
-**gathering_info phase**: 
+**gathering_info phase**:
 - Ask about dietary restrictions, preferences, and health goals
 - Once you have basic info, suggest moving to goal setting
 - "I have your preferences noted. How many calories are you targeting daily?"
@@ -152,93 +154,121 @@ When users manually build plans:
 - Offer suggest_foods_to_meet_goals if they're short on any nutrients
 
 Remember: You're here to make meal planning easy, enjoyable, and personalized!"""
-    
+
     def agent_node(state: MealPlannerState) -> dict:
         """Main ReAct agent node."""
         messages = state["messages"]
-        
+
         # Build conversation for LLM
         llm_messages = [SystemMessage(content=AGENT_PROMPT)]
-        
+
         # Add phase-specific guidance
         phase = state.get("conversation_context", {}).planning_phase
         if phase:
             phase_guidance = get_phase_guidance(phase, state)
             if phase_guidance:
                 llm_messages.append(SystemMessage(content=phase_guidance))
-        
+
         # Add nutrition context if relevant
         if state.get("current_totals") and state.get("nutrition_goals"):
             totals = state["current_totals"]
             goals = state["nutrition_goals"]
-            nutrition_context = f"Current nutrition: {totals.calories:.0f} cal, {totals.protein:.0f}g protein ({(totals.calories/goals.daily_calories*100):.0f}% of daily goal)"
+            nutrition_context = (
+                f"Current nutrition: {totals.calories:.0f} cal, "
+                f"{totals.protein:.0f}g protein "
+                f"({(totals.calories/goals.daily_calories*100):.0f}% of daily goal)"
+            )
             llm_messages.append(SystemMessage(content=nutrition_context))
-        
+
         # Add conversation history (limit to recent messages to avoid token issues)
         for msg in messages[-10:]:
             if not isinstance(msg, SystemMessage):
                 llm_messages.append(msg)
-        
+
         # Get agent response
         result = llm_with_tools.invoke(llm_messages)
-        
+
         return {"messages": [result]}
-    
+
     # Build the graph
     graph = StateGraph(MealPlannerState)
-    
+
     # Add nodes
     graph.add_node("agent", agent_node)
     graph.add_node("tools", ToolNode(tools))
-    
+
     # Add edges
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", tools_condition)
     graph.add_edge("tools", "agent")
     graph.add_edge("agent", END)
-    
+
     return graph.compile()
 
 
 def get_phase_guidance(phase: str, state: MealPlannerState) -> str:
     """Get specific guidance based on current conversation phase."""
-    
+
     if phase == "gathering_info":
         if not state.get("user_profile") or not state["user_profile"].dietary_restrictions:
             return "Current phase: Gathering Info. Ask about dietary restrictions and preferences."
         else:
-            return "Current phase: Gathering Info. You have their restrictions. Ask about calorie goals to move to next phase."
-    
+            return (
+                "Current phase: Gathering Info. You have their restrictions. "
+                "Ask about calorie goals to move to next phase."
+            )
+
     elif phase == "setting_goals":
         if not state.get("nutrition_goals"):
             return "Current phase: Setting Goals. Help them set daily calorie and macro targets."
         else:
-            return "Current phase: Setting Goals. Goals are set! Offer to start building their meal plan."
-    
+            return (
+                "Current phase: Setting Goals. Goals are set! "
+                "Offer to start building their meal plan."
+            )
+
     elif phase == "building_meals":
         # Count how many meals have items
         meals_with_items = sum(1 for meal in ["breakfast", "lunch", "dinner"] if state.get(meal))
         empty_meals = [meal for meal in ["breakfast", "lunch", "dinner"] if not state.get(meal)]
-        
+
         if meals_with_items < 2:
-            return f"Current phase: Building Meals. {meals_with_items}/3 main meals planned. Focus on building out the meal plan."
+            return (
+                f"Current phase: Building Meals. {meals_with_items}/3 main meals planned. "
+                "Focus on building out the meal plan."
+            )
         elif empty_meals:
-            return f"Current phase: Building Meals. Empty slots: {', '.join(empty_meals)}. Offer to use generate_remaining_meals to fill them."
+            return (
+                f"Current phase: Building Meals. Empty slots: {', '.join(empty_meals)}. "
+                "Offer to use generate_remaining_meals to fill them."
+            )
         else:
-            return "Current phase: Building Meals. Most meals have items. Check if they're satisfied or want to optimize."
-    
+            return (
+                "Current phase: Building Meals. Most meals have items. "
+                "Check if they're satisfied or want to optimize."
+            )
+
     elif phase == "optimizing":
         if state.get("current_totals") and state.get("nutrition_goals"):
             totals = state["current_totals"]
             goals = state["nutrition_goals"]
             if totals.calories < goals.daily_calories * 0.9:
-                return "Current phase: Optimizing. They're under calorie target. Suggest foods to meet goals or generate_remaining_meals."
+                return (
+                    "Current phase: Optimizing. They're under calorie target. "
+                    "Suggest foods to meet goals or generate_remaining_meals."
+                )
             else:
-                return "Current phase: Optimizing. Nutrition looks good! Offer to generate shopping list or save as template."
-    
+                return (
+                    "Current phase: Optimizing. Nutrition looks good! "
+                    "Offer to generate shopping list or save as template."
+                )
+
     elif phase == "complete":
-        return "Current phase: Complete. Offer shopping list, meal prep tips, or to save successful combinations."
-    
+        return (
+            "Current phase: Complete. Offer shopping list, meal prep tips, "
+            "or to save successful combinations."
+        )
+
     return f"Current phase: {phase}"
 
 
@@ -246,4 +276,4 @@ def get_phase_guidance(phase: str, state: MealPlannerState) -> str:
 graph = create_meal_planning_agent()
 
 # This is what LangGraph Studio will load
-__all__ = ["graph"] 
+__all__ = ["graph"]

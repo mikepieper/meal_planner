@@ -15,10 +15,10 @@ from src.models import MealPlannerState
 def build_meal_plan_context(state: MealPlannerState) -> Optional[SystemMessage]:
     """
     Build context message from current meal plan if conditions are met.
-    
+
     Args:
         state: Current agent state containing meal plan
-        
+
     Returns:
         SystemMessage with meal plan context, or None if conditions not met
     """
@@ -29,4 +29,4 @@ def build_meal_plan_context(state: MealPlannerState) -> Optional[SystemMessage]:
         if any([plan.breakfast, plan.lunch, plan.dinner, plan.snacks]):
             context = f"Current meal plan status: {json.dumps(plan.model_dump(), default=str, indent=2)}"
             return SystemMessage(content=context)
-    return None 
+    return None

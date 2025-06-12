@@ -1,14 +1,16 @@
 import json
-
-from langgraph.prebuilt import InjectedState
 from typing import Annotated, Optional, List, Dict, Any, Literal
+
 from langchain_core.tools import tool
-from langchain_core.messages import ToolMessage
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from src.models import MealPlannerState, MealItem, NutritionInfo, NutritionGoals, MealSuggestion, ConversationContext, UserProfile
+from src.models import (
+    MealPlannerState, MealItem, NutritionInfo, NutritionGoals,
+    MealSuggestion
+)
 
 # Initialize LLM for generation tools
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
@@ -21,17 +23,17 @@ def calculate_meal_totals(state: MealPlannerState) -> NutritionInfo:
     for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
         for item in state[meal_type]:
             all_items.append(f"{item.amount} {item.unit} of {item.food}")
-    
+
     if not all_items:
         return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
-    
+
     # Use LLM to estimate totals
     prompt = f"""Estimate the total nutritional content for all these items:
 {chr(10).join(all_items)}
 
 Respond ONLY with a JSON object in this exact format:
 {{"calories": 1500, "protein": 75, "carbohydrates": 180, "fat": 50}}"""
-    
+
     try:
         response = llm.invoke(prompt)
         data = json.loads(response.content)
@@ -41,7 +43,7 @@ Respond ONLY with a JSON object in this exact format:
             carbohydrates=data["carbohydrates"],
             fat=data["fat"]
         )
-    except:
+    except (json.JSONDecodeError, KeyError, TypeError):
         return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
 
 
@@ -49,7 +51,7 @@ def is_food_allowed(food: str, dietary_restrictions: List[str]) -> bool:
     """Check if a food item is allowed based on dietary restrictions."""
     if not dietary_restrictions:
         return True
-    
+
     # Use LLM for intelligent restriction checking
     prompt = f"""Given these dietary restrictions: {', '.join(dietary_restrictions)}
 Is this food allowed: {food}?
@@ -61,7 +63,7 @@ Consider:
 - Health conditions
 
 Respond with only "YES" or "NO"."""
-    
+
     response = llm.invoke(prompt)
     return response.content.strip().upper() == "YES"
 
@@ -70,13 +72,13 @@ def get_restriction_violation(food: str, dietary_restrictions: List[str]) -> Opt
     """Get specific restriction violated by a food item."""
     if not dietary_restrictions:
         return None
-    
+
     prompt = f"""Given these dietary restrictions: {', '.join(dietary_restrictions)}
 Which restriction (if any) does this food violate: {food}?
 
 If no violation, respond with "NONE".
 If violation, respond with just the restriction name (e.g., "vegetarian", "gluten-free")."""
-    
+
     response = llm.invoke(prompt)
     violation = response.content.strip()
     return None if violation.upper() == "NONE" else violation
@@ -86,7 +88,7 @@ def should_progress_to_optimizing(state: MealPlannerState) -> bool:
     """Check if we should move to optimizing phase."""
     # Count meals with items
     meals_with_items = sum(1 for meal in ["breakfast", "lunch", "dinner"] if state.get(meal))
-    
+
     # Progress if we have at least 2 meals planned and nutrition goals
     return meals_with_items >= 2 and state.get("nutrition_goals") is not None
 
@@ -95,10 +97,10 @@ def should_progress_to_complete(state: MealPlannerState) -> bool:
     """Check if we should move to complete phase."""
     if not state.get("current_totals") or not state.get("nutrition_goals"):
         return False
-    
+
     totals = state["current_totals"]
     goals = state["nutrition_goals"]
-    
+
     # Complete if we're within 10% of calorie goal
     calorie_percent = totals.calories / goals.daily_calories
     return 0.9 <= calorie_percent <= 1.1
@@ -119,21 +121,21 @@ def add_meal_item(
     # Check dietary restrictions
     restrictions = state["user_profile"].dietary_restrictions
     if not is_food_allowed(food, restrictions):
-        violation = get_restriction_violation(food, restrictions)
-        return Command(update={})  # Agent will handle the message
-    
+        # Agent will handle the restriction violation message
+        return Command(update={})
+
     new_item = MealItem(food=food, amount=amount, unit=unit)
     updated_meal = state[meal_type] + [new_item]
-    
+
     # Calculate new totals
     temp_state = dict(state)
     temp_state[meal_type] = updated_meal
     new_totals = calculate_meal_totals(temp_state)
-    
+
     # Update phase if needed
     context = state["conversation_context"]
     new_context = context.model_copy()
-    
+
     # Progress phase based on state
     if new_context.planning_phase == "gathering_info" and state.get("nutrition_goals"):
         new_context.planning_phase = "building_meals"
@@ -143,7 +145,7 @@ def add_meal_item(
         new_context.planning_phase = "optimizing"
     elif new_context.planning_phase == "optimizing" and should_progress_to_complete(temp_state):
         new_context.planning_phase = "complete"
-    
+
     return Command(
         update={
             meal_type: updated_meal,
@@ -164,36 +166,35 @@ def add_multiple_items(
     """Add multiple items to a meal in one operation. Each item should have 'food', 'amount', and optionally 'unit'."""
     restrictions = state["user_profile"].dietary_restrictions
     new_items = []
-    
+
     # Validate all items first
     for item_data in items:
         food = item_data["food"]
         if not is_food_allowed(food, restrictions):
-            violation = get_restriction_violation(food, restrictions)
             # Skip restricted items
             continue
-        
+
         new_items.append(MealItem(
             food=food,
             amount=item_data["amount"],
             unit=item_data.get("unit", "serving")
         ))
-    
+
     if not new_items:
         return Command(update={})  # All items were restricted
-    
+
     # Add all allowed items to the meal
     updated_meal = state[meal_type] + new_items
-    
+
     # Calculate new totals
     temp_state = dict(state)
     temp_state[meal_type] = updated_meal
     new_totals = calculate_meal_totals(temp_state)
-    
+
     # Update planning phase if appropriate
     context = state["conversation_context"]
     new_context = context.model_copy()
-    
+
     # Progress phase based on state
     if new_context.planning_phase in ["gathering_info", "setting_goals"] and state.get("nutrition_goals"):
         new_context.planning_phase = "building_meals"
@@ -201,7 +202,7 @@ def add_multiple_items(
         new_context.planning_phase = "optimizing"
     elif new_context.planning_phase == "optimizing" and should_progress_to_complete(temp_state):
         new_context.planning_phase = "complete"
-    
+
     return Command(
         update={
             meal_type: updated_meal,
@@ -221,37 +222,37 @@ def add_meal_from_suggestion(
 ) -> Command:
     """Add a complete suggested meal using its key (e.g., 'option_1')."""
     context = state["conversation_context"]
-    
+
     # Get the suggestion from conversation context
     if meal_type not in context.last_suggestions:
         return Command(update={})  # No suggestions for this meal type
-    
+
     if suggestion_key not in context.last_suggestions[meal_type]:
         return Command(update={})  # Invalid suggestion key
-    
+
     suggestion = context.last_suggestions[meal_type][suggestion_key]
-    
+
     # Validate all items (suggestions should already be validated, but double-check)
     restrictions = state["user_profile"].dietary_restrictions
     allowed_items = []
     for item in suggestion.items:
         if is_food_allowed(item.food, restrictions):
             allowed_items.append(item)
-    
+
     if not allowed_items:
         return Command(update={})
-    
+
     # Add all items from the suggestion
     updated_meal = state[meal_type] + allowed_items
-    
+
     # Calculate new totals
     temp_state = dict(state)
     temp_state[meal_type] = updated_meal
     new_totals = calculate_meal_totals(temp_state)
-    
+
     # Update planning phase if we're starting to build meals
     new_context = context.model_copy()
-    
+
     # Progress phase based on state
     if new_context.planning_phase in ["gathering_info", "setting_goals"] and state.get("nutrition_goals"):
         new_context.planning_phase = "building_meals"
@@ -259,7 +260,7 @@ def add_meal_from_suggestion(
         new_context.planning_phase = "optimizing"
     elif new_context.planning_phase == "optimizing" and should_progress_to_complete(temp_state):
         new_context.planning_phase = "complete"
-    
+
     return Command(
         update={
             meal_type: updated_meal,
@@ -279,7 +280,7 @@ def remove_meal_item(
 ) -> Command:
     """Remove a food item from a specific meal."""
     meal_list = state[meal_type]
-    
+
     # Find and remove the item (immutable update)
     updated_meal = []
     found = False
@@ -288,16 +289,16 @@ def remove_meal_item(
             found = True  # Skip this item (remove it)
         else:
             updated_meal.append(item)
-    
+
     if not found:
         # Return command with no updates but a message
         return Command(update={})
-    
+
     # Calculate new totals
     temp_state = dict(state)
     temp_state[meal_type] = updated_meal
     new_totals = calculate_meal_totals(temp_state)
-    
+
     return Command(
         update={
             meal_type: updated_meal,
@@ -314,7 +315,7 @@ def view_current_meals(
 ) -> str:
     """View all meals currently in the meal plan."""
     result = "Current Meal Plan:\n\n"
-    
+
     for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
         items = state[meal_type]
         if items:
@@ -324,7 +325,7 @@ def view_current_meals(
             result += "\n"
         else:
             result += f"**{meal_type.capitalize()}:** Empty\n\n"
-    
+
     # Add current nutrition totals if available
     if state.get("current_totals"):
         totals = state["current_totals"]
@@ -333,14 +334,16 @@ def view_current_meals(
         result += f"- Protein: {totals.protein:.0f}g\n"
         result += f"- Carbohydrates: {totals.carbohydrates:.0f}g\n"
         result += f"- Fat: {totals.fat:.0f}g\n"
-        
+
         # Compare to goals if set
         if state.get("nutrition_goals"):
             goals = state["nutrition_goals"]
-            result += f"\n**Progress to Goals:**\n"
-            result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({(totals.calories/goals.daily_calories*100):.0f}%)\n"
-            result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({(totals.protein/goals.protein_target*100):.0f}%)\n"
-    
+            result += "\n**Progress to Goals:**\n"
+            calories_percent = (totals.calories/goals.daily_calories*100)
+            protein_percent = (totals.protein/goals.protein_target*100)
+            result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
+            result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
+
     return result.strip()
 
 
@@ -355,7 +358,7 @@ def clear_meal(
     temp_state = dict(state)
     temp_state[meal_type] = []
     new_totals = calculate_meal_totals(temp_state)
-    
+
     return Command(
         update={
             meal_type: [],
@@ -397,7 +400,7 @@ def update_user_profile(
     """Update user profile information. Only provided fields will be updated."""
     profile = state["user_profile"]
     new_profile = profile.model_copy()
-    
+
     # Update only provided fields
     if dietary_restrictions is not None:
         new_profile.dietary_restrictions = dietary_restrictions
@@ -407,11 +410,11 @@ def update_user_profile(
         new_profile.cooking_time_preference = cooking_time_preference
     if health_goals is not None:
         new_profile.health_goals = health_goals
-    
+
     # Track preferences in conversation context
     context = state["conversation_context"]
     new_context = context.model_copy()
-    
+
     if dietary_restrictions:
         new_context.mentioned_preferences["dietary_restrictions"] = dietary_restrictions
     if preferred_cuisines:
@@ -420,7 +423,7 @@ def update_user_profile(
         new_context.mentioned_preferences["cooking_time"] = cooking_time_preference
     if health_goals:
         new_context.mentioned_preferences["health_goals"] = health_goals
-    
+
     return Command(
         update={
             "user_profile": new_profile,
@@ -456,7 +459,7 @@ def set_nutrition_goals(
         protein_percent = 0.20
         carb_percent = 0.50
         fat_percent = 0.30
-    
+
     goals = NutritionGoals(
         daily_calories=daily_calories,
         diet_type=diet_type,
@@ -464,21 +467,21 @@ def set_nutrition_goals(
         carb_target=daily_calories * carb_percent / 4,       # 4 cal/g carbs
         fat_target=daily_calories * fat_percent / 9          # 9 cal/g fat
     )
-    
+
     # Update conversation phase - always progress from gathering_info to setting_goals
     context = state["conversation_context"]
     new_context = context.model_copy()
-    
+
     if new_context.planning_phase == "gathering_info":
         new_context.planning_phase = "setting_goals"
-    
+
     # If we already have meals, might need to jump to building_meals or optimizing
     meals_with_items = sum(1 for meal in ["breakfast", "lunch", "dinner"] if state.get(meal))
     if meals_with_items > 0:
         new_context.planning_phase = "building_meals"
         if meals_with_items >= 2:
             new_context.planning_phase = "optimizing"
-    
+
     return Command(
         update={
             "nutrition_goals": goals,
@@ -497,7 +500,7 @@ def analyze_meal_nutrition(
     items = state[meal_type]
     if not items:
         return f"{meal_type.capitalize()} is empty."
-    
+
     # This would normally use a food database - using estimates for now
     prompt = f"""Estimate the nutritional content for this {meal_type}:
 {chr(10).join([f"- {item.amount} {item.unit} of {item.food}" for item in items])}
@@ -507,7 +510,7 @@ Calories: X
 Protein: Xg
 Carbohydrates: Xg
 Fat: Xg"""
-    
+
     response = llm.invoke(prompt)
     return f"**{meal_type.capitalize()} Nutrition:**\n{response.content}"
 
@@ -521,33 +524,33 @@ def analyze_daily_nutrition(
     if state.get("current_totals"):
         totals = state["current_totals"]
         result = "**Daily Nutrition Analysis:**\n\n"
-        result += f"**Current Totals:**\n"
+        result += "**Current Totals:**\n"
         result += f"- Calories: {totals.calories:.0f}\n"
         result += f"- Protein: {totals.protein:.0f}g\n"
         result += f"- Carbohydrates: {totals.carbohydrates:.0f}g\n"
         result += f"- Fat: {totals.fat:.0f}g\n"
-        
+
         if state.get("nutrition_goals"):
             goals = state["nutrition_goals"]
-            result += f"\n**Goals:**\n"
+            result += "\n**Goals:**\n"
             result += f"- Calories: {goals.daily_calories}\n"
             result += f"- Protein: {goals.protein_target:.0f}g\n"
             result += f"- Carbohydrates: {goals.carb_target:.0f}g\n"
             result += f"- Fat: {goals.fat_target:.0f}g\n"
-            
-            result += f"\n**Progress:**\n"
+
+            result += "\n**Progress:**\n"
             result += f"- Calories: {(totals.calories/goals.daily_calories*100):.0f}% of goal\n"
             result += f"- Protein: {(totals.protein/goals.protein_target*100):.0f}% of goal\n"
             result += f"- Carbohydrates: {(totals.carbohydrates/goals.carb_target*100):.0f}% of goal\n"
             result += f"- Fat: {(totals.fat/goals.fat_target*100):.0f}% of goal\n"
-            
+
             # Calculate remaining needs
-            result += f"\n**Remaining for the day:**\n"
+            result += "\n**Remaining for the day:**\n"
             result += f"- Calories: {max(0, goals.daily_calories - totals.calories):.0f}\n"
             result += f"- Protein: {max(0, goals.protein_target - totals.protein):.0f}g\n"
             result += f"- Carbohydrates: {max(0, goals.carb_target - totals.carbohydrates):.0f}g\n"
             result += f"- Fat: {max(0, goals.fat_target - totals.fat):.0f}g\n"
-        
+
         return result
     else:
         return "No meals in the current plan to analyze."
@@ -563,17 +566,17 @@ def suggest_foods_to_meet_goals(
     """Suggest foods that would help meet remaining nutrition goals."""
     if not state.get("nutrition_goals") or not state.get("current_totals"):
         return "Please set nutrition goals first to get targeted suggestions."
-    
+
     goals = state["nutrition_goals"]
     totals = state["current_totals"]
     restrictions = state["user_profile"].dietary_restrictions
-    
+
     # Calculate what's needed
     calories_needed = max(0, goals.daily_calories - totals.calories)
     protein_needed = max(0, goals.protein_target - totals.protein)
     carbs_needed = max(0, goals.carb_target - totals.carbohydrates)
     fat_needed = max(0, goals.fat_target - totals.fat)
-    
+
     prompt = f"""Suggest foods to help meet these remaining nutrition needs:
 - Calories: {calories_needed:.0f}
 - Protein: {protein_needed:.0f}g
@@ -585,7 +588,7 @@ Diet type: {goals.diet_type}
 
 Provide 5-7 specific food suggestions with portions that would help fill these gaps.
 Focus on foods that are high in the most needed nutrients."""
-    
+
     response = llm.invoke(prompt)
     return f"**Foods to help meet your remaining goals:**\n\n{response.content}"
 
@@ -602,7 +605,7 @@ def generate_remaining_meals(
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
     current_totals = state.get("current_totals", NutritionInfo())
-    
+
     # Determine which meals to generate
     if meal_types is None:
         # Auto-detect empty meals
@@ -610,75 +613,75 @@ def generate_remaining_meals(
         for meal in ["breakfast", "lunch", "dinner", "snacks"]:
             if not state.get(meal):
                 meal_types.append(meal)
-    
+
     if not meal_types:
         return Command(update={})  # All meals already have items
-    
+
     # Calculate remaining nutrition needs
     remaining_calories = nutrition_goals.daily_calories - current_totals.calories if nutrition_goals else 2000
     remaining_protein = nutrition_goals.protein_target - current_totals.protein if nutrition_goals else 50
-    
+
     context = f"Generate meals ONLY for these empty slots: {', '.join(meal_types)}\n\n"
-    context += f"Remaining nutrition budget:\n"
+    context += "Remaining nutrition budget:\n"
     context += f"- Calories: {remaining_calories:.0f}\n"
     context += f"- Protein: {remaining_protein:.0f}g\n"
-    
+
     if nutrition_goals:
         context += f"Diet type: {nutrition_goals.diet_type}\n"
-    
+
     if user_profile:
         if user_profile.dietary_restrictions:
             context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
             context += "IMPORTANT: Do not include any foods that violate these restrictions!\n"
         if user_profile.preferred_cuisines:
             context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
-    
+
     # Allocate calories proportionally to remaining meals
     meals_to_generate = len([m for m in meal_types if m in ["breakfast", "lunch", "dinner"]])
     snacks_to_generate = 1 if "snacks" in meal_types else 0
-    
+
     if meals_to_generate > 0:
         calories_per_meal = remaining_calories * 0.9 / meals_to_generate  # 90% for main meals
         calories_for_snacks = remaining_calories * 0.1 if snacks_to_generate else 0
     else:
         calories_per_meal = 0
         calories_for_snacks = remaining_calories
-    
+
     context += f"\nTarget calories per meal: ~{calories_per_meal:.0f}\n"
     if snacks_to_generate:
         context += f"Target calories for snacks: ~{calories_for_snacks:.0f}\n"
-    
+
     prompt = f"""{context}
-    
+
 Generate meals with specific portions. Format as JSON:
 {{"""
-    
+
     for meal in meal_types:
         prompt += f"""
     "{meal}": [
         {{"food": "item1", "amount": "1", "unit": "cup"}},
         {{"food": "item2", "amount": "2", "unit": "oz"}}
     ],"""
-    
+
     prompt = prompt.rstrip(",") + "\n}"
-    
+
     response = llm.invoke(prompt)
-    
+
     # Update conversation phase
     conv_context = state["conversation_context"]
     new_context = conv_context.model_copy()
     new_context.planning_phase = "optimizing"
-    
+
     try:
         # Parse the LLM response
         import re
         json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
         if json_match:
             meal_data = json.loads(json_match.group())
-            
+
             # Start with current state
             temp_state = dict(state)
-            
+
             # Only update the requested meals
             for meal_type in meal_types:
                 if meal_type in meal_data:
@@ -692,14 +695,14 @@ Generate meals with specific portions. Format as JSON:
                                 unit=item_data.get("unit", "serving")
                             ))
                     temp_state[meal_type] = items
-            
+
             # Calculate new totals
             new_totals = calculate_meal_totals(temp_state)
-            
+
             # Check if we should be in complete phase
             if should_progress_to_complete({"current_totals": new_totals, "nutrition_goals": nutrition_goals}):
                 new_context.planning_phase = "complete"
-            
+
             # Build updates - only for meals we generated
             updates = {
                 "conversation_context": new_context,
@@ -708,11 +711,11 @@ Generate meals with specific portions. Format as JSON:
             for meal_type in meal_types:
                 if meal_type in temp_state:
                     updates[meal_type] = temp_state[meal_type]
-            
+
             return Command(update=updates)
-    except:
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
         pass
-    
+
     # Fallback
     return Command(update={"conversation_context": new_context})
 
@@ -725,29 +728,29 @@ def generate_meal_plan(
     preserve_existing: bool = True
 ) -> Command:
     """Generate a complete daily meal plan. By default, preserves existing meals unless preserve_existing=False."""
-    
+
     # If preserve_existing and we have some meals, use generate_remaining_meals
     if preserve_existing:
         has_meals = any(state.get(meal) for meal in ["breakfast", "lunch", "dinner", "snacks"])
         if has_meals:
             # Delegate to generate_remaining_meals
             return generate_remaining_meals(state, tool_call_id)
-    
+
     # Otherwise, generate full plan (original behavior)
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
-    
+
     context = "Generate a complete daily meal plan with specific portions.\n\n"
-    
+
     if not preserve_existing:
         context += "NOTE: This will replace any existing meals.\n\n"
-    
+
     if nutrition_goals:
         context += f"Nutrition targets: {nutrition_goals.daily_calories} calories, "
         context += f"{nutrition_goals.protein_target:.0f}g protein, "
         context += f"{nutrition_goals.carb_target:.0f}g carbs, {nutrition_goals.fat_target:.0f}g fat\n"
         context += f"Diet type: {nutrition_goals.diet_type}\n"
-    
+
     if user_profile:
         if user_profile.dietary_restrictions:
             context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
@@ -756,12 +759,12 @@ def generate_meal_plan(
             context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
         if user_profile.cooking_time_preference:
             context += f"Cooking time preference: {user_profile.cooking_time_preference}\n"
-    
+
     if preferences:
         context += f"Additional preferences: {json.dumps(preferences)}\n"
-    
+
     prompt = f"""{context}
-    
+
 Create a meal plan with:
 - Breakfast (2-4 items)
 - Lunch (3-5 items)
@@ -779,25 +782,25 @@ For each meal, format as a JSON list of items:
     "snacks": [...]
 }}
 """
-    
+
     response = llm.invoke(prompt)
-    
+
     # Update conversation phase - generating a full plan means we're optimizing
     conv_context = state["conversation_context"]
     new_context = conv_context.model_copy()
     new_context.planning_phase = "optimizing"
-    
+
     try:
         # Parse the LLM response to extract meal items
         import re
         json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
         if json_match:
             meal_data = json.loads(json_match.group())
-            
+
             # Convert to MealItem objects and validate against restrictions
             temp_state = {"user_profile": user_profile}
             all_items = []
-            
+
             for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
                 if meal_type in meal_data:
                     items = []
@@ -814,26 +817,26 @@ For each meal, format as a JSON list of items:
                     temp_state[meal_type] = items
                 else:
                     temp_state[meal_type] = []
-            
+
             # Calculate totals for the new meal plan
             new_totals = calculate_meal_totals(temp_state)
-            
+
             # Check if we should be in complete phase
             if should_progress_to_complete({"current_totals": new_totals, "nutrition_goals": nutrition_goals}):
                 new_context.planning_phase = "complete"
-            
+
             updates = {
                 "conversation_context": new_context,
                 "current_totals": new_totals
             }
             for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
                 updates[meal_type] = temp_state[meal_type]
-            
+
             return Command(update=updates)
-    except:
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
         # If parsing fails, clear meals and let the agent handle it conversationally
         pass
-    
+
     # Fallback: clear meals and return empty state
     return Command(
         update={
@@ -858,40 +861,43 @@ def suggest_meal(
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
     current_totals = state.get("current_totals")
-    
+
     context = f"Suggest 3 different {meal_type} options.\n\n"
-    
+
     # Smart suggestions based on what's needed
     if nutrition_goals and current_totals:
         calories_remaining = nutrition_goals.daily_calories - current_totals.calories
         protein_remaining = nutrition_goals.protein_target - current_totals.protein
-        
+
         # Estimate portion of daily calories for this meal
         if meal_type in ["breakfast", "lunch", "dinner"]:
             meal_calories = calories_remaining / 3
         else:  # snacks
             meal_calories = calories_remaining / 10
-        
+
         context += f"Remaining nutrition needs:\n"
         context += f"- Calories: {calories_remaining:.0f} (target ~{meal_calories:.0f} for this meal)\n"
         context += f"- Protein: {protein_remaining:.0f}g\n"
         context += f"Diet type: {nutrition_goals.diet_type}\n\n"
-        
+
         if protein_remaining > 50:
             context += "PRIORITIZE HIGH PROTEIN OPTIONS\n"
     elif nutrition_goals:
         # No current meals, use standard portions
-        meal_calories = nutrition_goals.daily_calories / 3 if meal_type in ["breakfast", "lunch", "dinner"] else nutrition_goals.daily_calories / 10
+        if meal_type in ["breakfast", "lunch", "dinner"]:
+            meal_calories = nutrition_goals.daily_calories / 3
+        else:
+            meal_calories = nutrition_goals.daily_calories / 10
         context += f"Target approximately {meal_calories:.0f} calories\n"
         context += f"Diet type: {nutrition_goals.diet_type}\n"
-    
+
     if user_profile and user_profile.dietary_restrictions:
         context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
         context += "IMPORTANT: Only suggest foods that comply with these restrictions!\n"
-    
+
     if preferences:
         context += f"Additional preferences: {json.dumps(preferences)}\n"
-    
+
     prompt = f"""{context}
 
 Provide 3 {meal_type} suggestions in JSON format with specific portions:
@@ -913,22 +919,22 @@ Provide 3 {meal_type} suggestions in JSON format with specific portions:
     "option_2": {{...}},
     "option_3": {{...}}
 }}"""
-    
+
     response = llm.invoke(prompt)
-    
+
     # Parse response and save suggestions in conversation context
     conv_context = state["conversation_context"]
     new_context = conv_context.model_copy()
-    
+
     try:
         import re
         json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
         if json_match:
             suggestions_data = json.loads(json_match.group())
-            
+
             # Convert to MealSuggestion objects and save in context
             new_context.last_suggestions[meal_type] = {}
-            
+
             for key, data in suggestions_data.items():
                 if key.startswith("option_"):
                     items = []
@@ -940,7 +946,7 @@ Provide 3 {meal_type} suggestions in JSON format with specific portions:
                                 amount=item_data["amount"],
                                 unit=item_data.get("unit", "serving")
                             ))
-                    
+
                     if items:  # Only save suggestion if it has valid items
                         nutrition = NutritionInfo(
                             calories=data["nutrition"]["calories"],
@@ -948,19 +954,19 @@ Provide 3 {meal_type} suggestions in JSON format with specific portions:
                             carbohydrates=data["nutrition"]["carbohydrates"],
                             fat=data["nutrition"]["fat"]
                         )
-                        
+
                         suggestion = MealSuggestion(
                             name=data["name"],
                             items=items,
                             nutrition=nutrition,
                             description=data.get("description", "")
                         )
-                        
+
                         new_context.last_suggestions[meal_type][key] = suggestion
-    except:
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
         # If parsing fails, still update context to clear old suggestions
         new_context.last_suggestions[meal_type] = {}
-    
+
     # Return the conversation context update and the formatted response
     return Command(
         update={
@@ -971,14 +977,14 @@ Provide 3 {meal_type} suggestions in JSON format with specific portions:
 
 # === UTILITY TOOLS ===
 
-@tool  
+@tool
 def generate_shopping_list(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
     """Generate a shopping list from the current meal plan."""
     all_items = {}
-    
+
     # Collect all items from all meals
     for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
         for item in state[meal_type]:
@@ -986,10 +992,10 @@ def generate_shopping_list(
             if key not in all_items:
                 all_items[key] = []
             all_items[key].append(f"{item.amount} {item.unit}")
-    
+
     if not all_items:
         return "No items in meal plan to create shopping list."
-    
+
     # Build shopping list
     shopping_list = "Shopping List:\n\n"
     for food, amounts in sorted(all_items.items()):
@@ -997,7 +1003,7 @@ def generate_shopping_list(
             shopping_list += f"- {food.capitalize()}: {amounts[0]}\n"
         else:
             shopping_list += f"- {food.capitalize()}: {', '.join(amounts)} (total from multiple meals)\n"
-    
+
     return shopping_list
 
 
@@ -1009,19 +1015,17 @@ def get_meal_ideas(
 ) -> str:
     """Get meal ideas based on specific criteria like ingredients, cuisine, or cooking time."""
     user_profile = state.get("user_profile", {})
-    
+
     context = f"Provide meal ideas based on: {criteria}\n\n"
-    
+
     if user_profile and user_profile.dietary_restrictions:
         context += f"Keep in mind dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
         context += "Only suggest meals that comply with these restrictions!\n"
-    
+
     prompt = f"""{context}
 
 Provide 5 meal ideas that match the criteria.
 Include a brief description of each meal and why it fits the criteria."""
-    
+
     response = llm.invoke(prompt)
     return f"Meal ideas for '{criteria}':\n\n{response.content}"
-
-
