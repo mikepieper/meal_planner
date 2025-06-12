@@ -1,84 +1,40 @@
-from typing import Dict, Any, Optional, List
-import json
+from typing import Dict, Any
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, START
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import SystemMessage, AIMessage
 from langchain_core.tools import tool
 
 from src.models import MealPlannerState, UserProfile, MealPlan
 from src.tools import (
-    # Analysis & Planning
+    # Analysis only - no execution planning here
     analyze_message_complexity,
-    create_execution_plan,
     analyze_user_intent,
-    extract_nutrition_info,
 )
-
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
-
-@tool
-def analyze_message_complexity(
-    user_message: str
-) -> Dict[str, Any]:
-    """Analyze if a message contains multiple intents and determine complexity."""
-    
-    prompt = f"""Analyze this user message for meal planning complexity:
-
-User message: "{user_message}"
-
-Determine:
-1. Number of distinct intents/requests
-2. Whether planning/decomposition is needed
-3. Which tasks can be parallelized vs must be sequential
-4. Overall complexity level
-
-Respond in JSON:
-{{
-    "intent_count": <number>,
-    "complexity": "simple" | "moderate" | "complex",
-    "needs_planning": true | false,
-    "intents": [
-        {{
-            "type": "meal_modification" | "meal_generation" | "nutrition_setup" | "information_request",
-            "description": "<brief description>",
-            "dependencies": [], // list of other intent indices this depends on
-            "can_parallelize": true | false
-        }}
-    ]
-}}"""
-    
-    response = llm.invoke(prompt)
-    try:
-        return json.loads(response.content)
-    except json.JSONDecodeError:
-        return {
-            "intent_count": 1,
-            "complexity": "simple", 
-            "needs_planning": False,
-            "intents": [{"type": "meal_modification", "description": "Single request", "dependencies": [], "can_parallelize": False}]
-        }
 
 
 def create_intent_router_subgraph():
     """Router that analyzes messages and determines execution strategy."""
     
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    tools = [analyze_message_complexity, create_execution_plan, analyze_user_intent, extract_nutrition_info]
+    tools = [
+        analyze_message_complexity,
+        analyze_user_intent,
+    ]
     llm_with_tools = llm.bind_tools(tools)
     
     ROUTER_PROMPT = """
 You are the Intent Router for a meal planning system. Your job is to:
 
-1. Analyze incoming messages for complexity and multiple intents
-2. Determine the appropriate execution strategy 
-3. Route to specialized subgraphs
+1. Analyze incoming messages for complexity and user intent
+2. Route to the appropriate specialized subgraph
 
-For simple single-intent messages, route directly.
-For complex multi-intent messages, create an execution plan first.
+Process:
+1. First, use analyze_message_complexity to understand request complexity
+2. Then, use analyze_user_intent to understand assistance preferences
+3. Route based on the analysis results
 
-Always use analyze_message_complexity as your first step.
+You are ONLY responsible for analysis and routing - not execution planning.
 """
     
     def router_node(state: MealPlannerState) -> Dict[str, Any]:
@@ -101,22 +57,40 @@ Always use analyze_message_complexity as your first step.
         result = llm_with_tools.invoke(llm_messages)
         return {"messages": [result]}
     
-    def route_by_complexity(state: MealPlannerState) -> str:
-        """Route based on complexity analysis results."""
+    def route_by_analysis(state: MealPlannerState) -> str:
+        """Route based on complexity and intent analysis results."""
         last_msg = state["messages"][-1]
         
         if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
-            # Look for complexity analysis results
+            complexity_result = None
+            intent_result = None
+            
+            # Extract analysis results
             for tool_call in last_msg.tool_calls:
                 if tool_call["name"] == "analyze_message_complexity":
-                    # We have complexity analysis, next step depends on complexity
-                    return "task_coordinator"
+                    complexity_result = tool_call.get("result", {})
                 elif tool_call["name"] == "analyze_user_intent":
-                    # Simple intent analysis, route directly
-                    return "direct_router"
+                    intent_result = tool_call.get("result", {})
+            
+            # Route based on complexity first
+            if complexity_result and complexity_result.get("complexity") == "complex":
+                return "task_coordinator"
+            
+            # Then route based on intent for simple requests
+            if intent_result:
+                assistance_level = intent_result.get("assistance_level", "assisted")
+                if assistance_level == "manual":
+                    return "manual_editor"
+                elif assistance_level == "automated":
+                    if intent_result.get("calories_mentioned"):
+                        return "automated_planner"
+                    else:
+                        return "info_gatherer"
+                else:  # assisted
+                    return "automated_planner"
         
-        # Default to task coordinator for safety
-        return "task_coordinator"
+        # Default to automated planner for safety
+        return "automated_planner"
     
     # Build router subgraph
     router_graph = StateGraph(MealPlannerState)
@@ -126,6 +100,6 @@ Always use analyze_message_complexity as your first step.
     router_graph.add_edge(START, "router")
     router_graph.add_conditional_edges("router", tools_condition)
     router_graph.add_edge("tools", "router")
-    router_graph.add_conditional_edges("router", route_by_complexity)
+    router_graph.add_conditional_edges("router", route_by_analysis)
     
     return router_graph.compile()

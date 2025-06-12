@@ -22,7 +22,14 @@ def create_manual_editor_subgraph():
     """Handles direct meal plan modifications."""
     
     llm = ChatOpenAI(model="gpt-4o")
-    tools = [add_meal_item, remove_meal_item, update_meal_item, clear_meal, clear_meal_plan, add_multiple_meal_items]
+    tools = [
+        add_meal_item,
+        remove_meal_item,
+        update_meal_item,
+        clear_meal,
+        clear_meal_plan,
+        add_multiple_meal_items
+    ]
     llm_with_tools = llm.bind_tools(tools)
     
     EDITOR_PROMPT = """
@@ -48,6 +55,10 @@ Focus on the exact operations requested.
             llm_messages.append(context_msg)
         
         # Add recent messages
+        # Only use the last 2 messages to keep context focused and manageable:
+        # - Usually includes the user's current request and the previous response
+        # - Prevents token limit issues from long conversation history
+        # - Manual editing tasks typically only need immediate context
         for msg in messages[-2:]:
             if not isinstance(msg, SystemMessage):
                 llm_messages.append(msg)

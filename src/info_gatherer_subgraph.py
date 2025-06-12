@@ -6,29 +6,30 @@ from langchain_core.messages import SystemMessage
 
 from src.models import MealPlannerState
 from src.tools import (
-    # Analysis & Planning
-    analyze_user_intent,
+    # Only nutrition info extraction - intent analysis handled by router
     extract_nutrition_info
 )
 
 def create_info_gatherer_subgraph():
-    """Handles progressive disclosure when information is missing."""
+    """Handles progressive disclosure when nutrition information is missing."""
     
     llm = ChatOpenAI(model="gpt-4o")
-    tools = [extract_nutrition_info, analyze_user_intent]
+    tools = [extract_nutrition_info]
     llm_with_tools = llm.bind_tools(tools)
     
     GATHERER_PROMPT = """
-You are the Information Gatherer. When users want automated suggestions but haven't
-provided enough information, you guide them through progressive disclosure.
+You are the Information Gatherer. When users want automated meal planning but haven't
+provided key nutrition information, you help gather what's needed.
 
 Your approach:
-- Ask for the minimum information needed
-- Explain why the information helps
-- Provide options and examples
-- Make it easy to proceed without full details
+- Extract any nutrition info from their message using extract_nutrition_info
+- Ask for the minimum additional information needed for good recommendations
+- Explain why the information helps improve suggestions
+- Provide sensible defaults and examples
+- Make it easy to proceed even with minimal info
 
-Don't be pushy - respect if users want to proceed with defaults.
+Focus specifically on nutrition-related information: calories, diet type, restrictions.
+Don't re-analyze intent - that's already been determined.
 """
     
     def gatherer_node(state: MealPlannerState) -> Dict[str, Any]:
@@ -39,7 +40,7 @@ Don't be pushy - respect if users want to proceed with defaults.
         # Add user profile context
         if state.get("user_profile"):
             profile = state["user_profile"]
-            profile_info = f"Current user info: calories={profile.daily_calories}, diet_type={profile.diet_type}"
+            profile_info = f"Current user info: calories={profile.daily_calories}, diet_type={profile.diet_type}, restrictions={profile.dietary_restrictions}"
             llm_messages.append(SystemMessage(content=profile_info))
         
         # Add recent messages

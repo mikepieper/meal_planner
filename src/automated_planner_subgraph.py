@@ -8,9 +8,7 @@ from langchain_core.messages import SystemMessage
 
 from src.models import MealPlannerState
 from src.tools import (
-    # Analysis & Planning
-    extract_nutrition_info,
-    # Nutrition & Generation
+    # Nutrition & Generation - info extraction handled by other components
     set_nutrition_goals,
     generate_meal_suggestions
 )
@@ -20,7 +18,7 @@ def create_automated_planner_subgraph():
     """Generates meal suggestions and handles nutrition optimization."""
     
     llm = ChatOpenAI(model="gpt-4o")
-    tools = [set_nutrition_goals, generate_meal_suggestions, extract_nutrition_info]
+    tools = [set_nutrition_goals, generate_meal_suggestions]
     llm_with_tools = llm.bind_tools(tools)
     
     PLANNER_PROMPT = """
@@ -32,6 +30,8 @@ Your approach:
 3. Provide variety and balance in recommendations
 4. Offer customization options
 
+Assume intent analysis and nutrition info extraction have already been done.
+Focus on creating great meal recommendations based on available information.
 Use progressive disclosure - provide immediate value, then offer deeper personalization.
 """
     

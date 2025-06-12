@@ -18,16 +18,19 @@ def create_task_coordinator_subgraph():
     llm_with_tools = llm.bind_tools(tools)
     
     COORDINATOR_PROMPT = """
-You are the Task Coordinator. You receive complexity analysis and create execution plans
-for multi-intent meal planning requests.
+You are the Task Coordinator. You receive complex multi-intent requests and:
 
-Your job is to:
-1. Create detailed execution plans
-2. Coordinate sequential vs parallel execution
-3. Manage dependencies between tasks
-4. Route to appropriate specialized subgraphs
+1. Create detailed execution plans using create_execution_plan
+2. Analyze the plan to determine the best execution strategy
+3. Provide a comprehensive response that addresses all aspects of the request
 
-Use create_execution_plan to structure complex requests.
+Since this is a complex request, provide a thorough response that covers:
+- Acknowledgment of the multiple intents
+- Step-by-step breakdown of what will be addressed
+- Specific actions or recommendations for each intent
+- Clear next steps for the user
+
+You should handle the complexity here rather than routing to other subgraphs.
 """
     
     def coordinator_node(state: MealPlannerState) -> Dict[str, Any]:
@@ -43,19 +46,7 @@ Use create_execution_plan to structure complex requests.
         result = llm_with_tools.invoke(llm_messages)
         return {"messages": [result]}
     
-    def route_to_executor(state: MealPlannerState) -> str:
-        """Route to appropriate execution strategy."""
-        last_msg = state["messages"][-1]
-        
-        if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
-            for tool_call in last_msg.tool_calls:
-                if tool_call["name"] == "create_execution_plan":
-                    # We have an execution plan, route to parallel coordinator
-                    return "parallel_coordinator"
-        
-        return "sequential_executor"
-    
-    # Build coordinator subgraph
+    # Build coordinator subgraph - simplified to handle complexity internally
     coord_graph = StateGraph(MealPlannerState)
     coord_graph.add_node("coordinator", coordinator_node)
     coord_graph.add_node("tools", ToolNode(tools))
@@ -63,6 +54,6 @@ Use create_execution_plan to structure complex requests.
     coord_graph.add_edge(START, "coordinator")
     coord_graph.add_conditional_edges("coordinator", tools_condition)
     coord_graph.add_edge("tools", "coordinator")
-    coord_graph.add_conditional_edges("coordinator", route_to_executor)
+    coord_graph.add_edge("coordinator", END)
     
     return coord_graph.compile()
