@@ -6,36 +6,12 @@ from langchain_core.tools import tool
 from langchain_core.messages import ToolMessage
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from src.models import MealPlannerState, MealItem, NutritionInfo, NutritionGoals
 
 # Initialize LLM for generation tools
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
-
-def _validate_meal(meal: Optional[str], state: MealPlannerState) -> str:
-    """Helper function to validate and return the correct meal."""
-    if meal is None:
-        meal = state.get("current_meal", "breakfast")
-    if meal not in ["breakfast", "lunch", "dinner", "snack"]:
-        raise ValueError("Invalid meal specified. Choose 'breakfast', 'lunch', 'dinner', or 'snack'.")
-    return meal
-
-def _create_command(updates: Dict[str, Any], message: str, tool_call_id: str, update_current_meal: Optional[str] = None) -> Command:
-    """Helper function to create a Command with updates and message.
-    
-    Args:
-        updates: Dictionary of state updates
-        message: Message to add to state
-        tool_call_id: Tool call ID for the message
-        update_current_meal: If provided, updates the current_meal state
-    """
-    if update_current_meal:
-        updates["current_meal"] = update_current_meal
-    
-    if "messages" not in updates:
-        updates["messages"] = [ToolMessage(message, tool_call_id=tool_call_id)]
-    
-    return Command(update=updates)
 
 # === MEAL MANAGEMENT TOOLS ===
 
@@ -47,12 +23,20 @@ def add_meal_item(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
     unit: str = "serving"
-) -> str:
+) -> Command:
     """Add a food item to a specific meal."""
     new_item = MealItem(food=food, amount=amount, unit=unit)
-    state[meal_type].append(new_item)
     
-    return f"Added {amount} {unit} of {food} to {meal_type}."
+    # Create a new list with the item added (immutable update)
+    updated_meal = state[meal_type] + [new_item]
+    
+    return Command(
+        update={
+            meal_type: updated_meal,
+            "current_meal": meal_type
+        },
+        # The message will be automatically added to the messages list
+    )
 
 
 @tool
@@ -61,16 +45,29 @@ def remove_meal_item(
     food: str,
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
+) -> Command:
     """Remove a food item from a specific meal."""
     meal_list = state[meal_type]
     
+    # Find and remove the item (immutable update)
+    updated_meal = []
+    found = False
     for item in meal_list:
-        if item.food.lower() == food.lower():
-            meal_list.remove(item)
-            return f"Removed {food} from {meal_type}."
+        if item.food.lower() == food.lower() and not found:
+            found = True  # Skip this item (remove it)
+        else:
+            updated_meal.append(item)
     
-    return f"{food} not found in {meal_type}."
+    if not found:
+        # Return command with no updates but a message
+        return Command(update={})
+    
+    return Command(
+        update={
+            meal_type: updated_meal,
+            "current_meal": meal_type
+        }
+    )
 
 
 @tool
@@ -99,21 +96,31 @@ def clear_meal(
     meal_type: Literal["breakfast", "lunch", "dinner", "snacks"],
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
+) -> Command:
     """Clear all items from a specific meal."""
-    state[meal_type] = []
-    return f"Cleared all items from {meal_type}."
+    return Command(
+        update={
+            meal_type: [],
+            "current_meal": meal_type
+        }
+    )
 
 
 @tool
 def clear_all_meals(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
+) -> Command:
     """Clear the entire meal plan."""
-    for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
-        state[meal_type] = []
-    return "Cleared entire meal plan."
+    return Command(
+        update={
+            "breakfast": [],
+            "lunch": [],
+            "dinner": [],
+            "snacks": [],
+            "current_meal": "breakfast"
+        }
+    )
 
 
 # === NUTRITION TOOLS ===
@@ -124,7 +131,7 @@ def set_nutrition_goals(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
     diet_type: Literal["balanced", "high-protein", "low-carb", "keto", "vegetarian", "vegan"] = "balanced"
-) -> str:
+) -> Command:
     """Set personalized daily nutrition goals."""
     # Calculate macro targets based on diet type
     if diet_type == "high-protein":
@@ -152,10 +159,11 @@ def set_nutrition_goals(
         fat_target=daily_calories * fat_percent / 9          # 9 cal/g fat
     )
     
-    state["nutrition_goals"] = goals
-    
-    return f"Set nutrition goals: {daily_calories} calories/day with {diet_type} diet. " \
-           f"Targets: {goals.protein_target:.0f}g protein, {goals.carb_target:.0f}g carbs, {goals.fat_target:.0f}g fat."
+    return Command(
+        update={
+            "nutrition_goals": goals
+        }
+    )
 
 
 @tool
@@ -221,7 +229,7 @@ def generate_meal_plan(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
     preferences: Optional[Dict[str, Any]] = None
-) -> str:
+) -> Command:
     """Generate a complete daily meal plan based on preferences and goals."""
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
@@ -246,24 +254,61 @@ def generate_meal_plan(
     prompt = f"""{context}
     
 Create a meal plan with:
-- Breakfast
-- Lunch  
-- Dinner
-- Snacks (optional)
+- Breakfast (2-4 items)
+- Lunch (3-5 items)
+- Dinner (3-5 items)
+- Snacks (1-3 items, optional)
 
-For each meal, list specific items with amounts and units.
-Make sure the meals are balanced and meet the nutritional targets if specified.
+For each meal, format as a JSON list of items:
+{{
+    "breakfast": [
+        {{"food": "oatmeal", "amount": "1", "unit": "cup"}},
+        {{"food": "blueberries", "amount": "1/2", "unit": "cup"}}
+    ],
+    "lunch": [...],
+    "dinner": [...],
+    "snacks": [...]
+}}
 """
     
     response = llm.invoke(prompt)
     
-    # Clear existing meals before adding new plan
-    for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
-        state[meal_type] = []
+    try:
+        # Parse the LLM response to extract meal items
+        import re
+        json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+        if json_match:
+            meal_data = json.loads(json_match.group())
+            
+            # Convert to MealItem objects
+            updates = {}
+            for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
+                if meal_type in meal_data:
+                    items = []
+                    for item_data in meal_data[meal_type]:
+                        items.append(MealItem(
+                            food=item_data["food"],
+                            amount=item_data["amount"],
+                            unit=item_data.get("unit", "serving")
+                        ))
+                    updates[meal_type] = items
+                else:
+                    updates[meal_type] = []
+            
+            return Command(update=updates)
+    except:
+        # If parsing fails, clear meals and let the agent handle it conversationally
+        pass
     
-    # Note: In a real implementation, we would parse the response and use add_meal_item
-    # For now, we return the plan as text
-    return f"Generated meal plan:\n\n{response.content}"
+    # Fallback: clear meals and return empty state
+    return Command(
+        update={
+            "breakfast": [],
+            "lunch": [],
+            "dinner": [],
+            "snacks": []
+        }
+    )
 
 
 @tool
@@ -355,47 +400,3 @@ Include a brief description of each meal and why it fits the criteria."""
     return f"Meal ideas for '{criteria}':\n\n{response.content}"
 
 
-"""
- Tools for the intent router
-"""
-@tool
-def analyze_message_complexity(
-    user_message: str
-) -> Dict[str, Any]:
-    """Analyze if a message contains multiple intents and determine complexity."""
-    
-    prompt = f"""Analyze this user message for meal planning complexity:
-
-User message: "{user_message}"
-
-Determine:
-1. Number of distinct intents/requests
-2. Whether planning/decomposition is needed
-3. Which tasks can be parallelized vs must be sequential
-4. Overall complexity level
-
-Respond in JSON:
-{{
-    "intent_count": <number>,
-    "complexity": "simple" | "moderate" | "complex",
-    "needs_planning": true | false,
-    "intents": [
-        {{
-            "type": "meal_modification" | "meal_generation" | "nutrition_setup" | "information_request",
-            "description": "<brief description>",
-            "dependencies": [], // list of other intent indices this depends on
-            "can_parallelize": true | false
-        }}
-    ]
-}}"""
-    
-    response = llm.invoke(prompt)
-    try:
-        return json.loads(response.content)
-    except json.JSONDecodeError:
-        return {
-            "intent_count": 1,
-            "complexity": "simple", 
-            "needs_planning": False,
-            "intents": [{"type": "meal_modification", "description": "Single request", "dependencies": [], "can_parallelize": False}]
-        }

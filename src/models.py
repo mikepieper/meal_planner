@@ -89,3 +89,18 @@ class MealPlannerState(TypedDict):
     
     # Current meal being edited (for context)
     current_meal: Literal["breakfast", "lunch", "dinner", "snacks"]
+
+
+def create_initial_state() -> MealPlannerState:
+    """Create initial state with proper defaults."""
+    return {
+        "messages": [],
+        "breakfast": [],
+        "lunch": [],
+        "dinner": [],
+        "snacks": [],
+        "user_profile": UserProfile(),
+        "nutrition_goals": None,
+        "conversation_context": {},
+        "current_meal": "breakfast"
+    }
