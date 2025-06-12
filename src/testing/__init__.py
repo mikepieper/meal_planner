@@ -29,6 +29,12 @@ from src.testing.test_runner import (
     run_all_tests
 )
 
+from src.testing.test_utilities import (
+    TestAnalyzer,
+    cleanup_old_results,
+    run_regression_tests
+)
+
 __all__ = [
     # Test Scenarios
     "TestScenario",
@@ -53,5 +59,10 @@ __all__ = [
     # Test Runner
     "TestRunner",
     "run_test_scenario",
-    "run_all_tests"
+    "run_all_tests",
+    
+    # Test Utilities
+    "TestAnalyzer",
+    "cleanup_old_results",
+    "run_regression_tests"
 ] 
