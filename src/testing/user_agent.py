@@ -53,7 +53,7 @@ def create_user_agent():
         persona = scenario.persona
         
         # Build the prompt for the user agent
-        system_prompt = f"""You are simulating a user named {persona.name} who is interacting with a meal planning chatbot.
+        system_prompt = f"""You are simulating a REAL USER named {persona.name} who NEEDS HELP from a meal planning chatbot.
 
 PERSONA DETAILS:
 - Age: {persona.age}
@@ -77,35 +77,45 @@ CURRENT STATE:
 - Confusion: {state.confusion_level:.1f}
 - Impatience: {state.impatience_level:.1f}
 
+CRITICAL RULES - YOU ARE THE USER WHO NEEDS HELP:
+
+1. **You are NOT helpful or accommodating** - you have your own needs and problems to solve
+2. **You do NOT offer help to the chatbot** - the chatbot should help YOU
+3. **You are focused on YOUR goal** - be demanding about getting what you need
+4. **You are realistic and sometimes difficult** - real users aren't always pleasant
+5. **You don't say "let me know if you need anything"** - YOU need things from the bot
+
 BEHAVIORAL GUIDELINES:
 
 1. **Communication Style**:
-   - Direct: Be concise and to the point
-   - Chatty: Share extra context, ask follow-up questions
-   - Uncertain: Express doubt, ask for reassurance
+   - Direct: "I need X. Can you do that or not?"
+   - Chatty: "So I'm trying to do X because Y, and I really need help with Z..."
+   - Uncertain: "I think I need X? But I'm not sure if that's right..."
 
 2. **Decision Making**:
-   - Decisive: Make quick choices, don't waffle
-   - Indecisive: Ask for more options, change mind
-   - Exploratory: Ask about alternatives, compare options
+   - Decisive: Make quick choices, move forward fast
+   - Indecisive: "Actually, wait, maybe not that... what about...?"
+   - Exploratory: "What are my other options? I want to see everything first"
 
-3. **Emotional State**:
-   - If confusion > 0.5: Ask for clarification
-   - If impatience > 0.7: Express frustration politely
-   - If satisfaction < 0.3: Consider ending conversation
+3. **Emotional Responses**:
+   - If confused: "I don't understand what you mean" or "That doesn't make sense"
+   - If impatient: "This is taking too long" or "Can we just get to the point?"
+   - If satisfied: "Perfect, that's exactly what I wanted" or "Great, what's next?"
 
-4. **Goal Progress**:
-   - Stay focused on achieving your goal
-   - If the chatbot goes off-track, redirect
-   - Acknowledge when parts of goal are met
+4. **User Behavior**:
+   - Push for what you want: "But I specifically said I need..."
+   - Question unclear responses: "What do you mean by that?"
+   - Redirect when off-topic: "That's not what I asked for"
+   - Express frustration when appropriate: "This isn't working for me"
 
-5. **Natural Behavior**:
-   - Make typos occasionally if tech_savviness is "low"
-   - Use natural language, not robotic responses
-   - React emotionally when appropriate
+5. **Goal-Oriented**:
+   - Keep pushing toward your specific goal
+   - Don't get sidetracked by the bot's agenda
+   - Express what you actually need, not what's polite
 
-Remember: You're a real person with {persona.name}'s characteristics, not a test bot.
-Generate ONLY your next message as {persona.name} would say it."""
+Remember: You're a REAL PERSON with problems to solve, not a customer service representative. Be authentic to {persona.name}'s personality and current emotional state. NEVER offer help to the chatbot - YOU are the one who needs help.
+
+Generate ONLY your next message as {persona.name} would realistically say it."""
 
         # Add conversation history
         messages = [SystemMessage(content=system_prompt)]
@@ -233,13 +243,8 @@ Respond with a JSON object like:
     graph.add_edge("generate_response", "check_progress")
     graph.add_edge("check_progress", "check_end")
     
-    # Conditional edge from check_end
-    def route_from_check_end(state: UserAgentState):
-        if state.should_end:
-            return END
-        return "generate_response"
-    
-    graph.add_conditional_edges("check_end", route_from_check_end)
+    # Always end after checking - the test runner will call us again if needed
+    graph.add_edge("check_end", END)
     
     return graph.compile()
 
@@ -291,8 +296,8 @@ def initialize_user_state(scenario: TestScenario) -> UserAgentState:
             "Can you help me plan meals to meet my protein goals?"
         ],
         ConversationGoal.ACCOMMODATE_RESTRICTIONS: [
-            f"I'm {persona.dietary_restrictions[0]} and need meal ideas",
-            f"I have dietary restrictions - {', '.join(persona.dietary_restrictions)}",
+            f"I'm {persona.dietary_restrictions[0]} and need meal ideas" if persona.dietary_restrictions else "I have dietary restrictions and need meal ideas",
+            f"I have dietary restrictions - {', '.join(persona.dietary_restrictions)}" if persona.dietary_restrictions else "I have some dietary restrictions",
             "I need help finding meals that fit my dietary needs"
         ],
         ConversationGoal.QUICK_MEAL_IDEAS: [

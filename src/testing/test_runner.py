@@ -5,7 +5,6 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import os
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.store.memory import InMemoryStore
 import langsmith
 from langsmith import traceable
 
@@ -13,6 +12,7 @@ from src.testing.test_scenarios import TestScenario, get_scenario_by_id, get_all
 from src.testing.user_agent import user_agent, initialize_user_state, UserAgentState
 from src.testing.validation_agent import validation_agent, ValidationState, save_validation_report, ValidationReport
 from src.agent import graph as meal_planning_graph
+from src.models import create_initial_state
 
 
 class TestRunner:
@@ -23,7 +23,6 @@ class TestRunner:
         self.meal_planning_agent = meal_planning_graph
         self.user_simulation_agent = user_agent
         self.validation_agent = validation_agent
-        self.memory_store = InMemoryStore()
         
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
@@ -87,16 +86,47 @@ class TestRunner:
             # User turn
             print(f"Turn {turn_count + 1}:")
             
-            # Get the last user message from state
-            last_user_msg = user_state.messages[-1].content
+            # Get the user's message (first turn should already have initial message)
+            if turn_count == 0:
+                # Use the initial message from state initialization
+                last_user_msg = user_state.messages[-1].content
+            else:
+                # Let user agent process previous response and generate next message
+                user_config = {"configurable": {"thread_id": f"user_{scenario.scenario_id}"}, "recursion_limit": 50}
+                user_response = await self.user_simulation_agent.ainvoke(user_state, config=user_config)
+                
+                # Extract the updated state from the response
+                if isinstance(user_response, dict):
+                    # Update the user_state with the returned values
+                    for key, value in user_response.items():
+                        if hasattr(user_state, key):
+                            setattr(user_state, key, value)
+                else:
+                    user_state = user_response
+                
+                # Check if conversation should end after user processing
+                if user_state.should_end:
+                    break
+                
+                # Get the newly generated user message
+                last_user_msg = user_state.messages[-1].content
+            
             print(f"User: {last_user_msg}")
             
             # Send to chatbot
-            chatbot_response = await self.meal_planning_agent.ainvoke(
-                {"messages": [HumanMessage(content=last_user_msg)]},
-                config=chatbot_config,
-                store=self.memory_store
-            )
+            # Initialize proper state on first turn
+            if turn_count == 0:
+                initial_state = create_initial_state()
+                initial_state["messages"] = [HumanMessage(content=last_user_msg)]
+                chatbot_response = await self.meal_planning_agent.ainvoke(
+                    initial_state,
+                    config=chatbot_config
+                )
+            else:
+                chatbot_response = await self.meal_planning_agent.ainvoke(
+                    {"messages": [HumanMessage(content=last_user_msg)]},
+                    config=chatbot_config
+                )
             
             # Get assistant response
             assistant_msg = chatbot_response["messages"][-1]
@@ -111,10 +141,6 @@ class TestRunner:
             
             # Update user state with assistant response
             user_state.messages.append(assistant_msg)
-            
-            # Let user agent process response and generate next message
-            user_response = await self.user_simulation_agent.ainvoke(user_state)
-            user_state = user_response  # This contains updated state
             
             turn_count += 1
         

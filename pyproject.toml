@@ -32,6 +32,8 @@ langgraph-checkpoint-sqlite = "^2.0.10"
 langgraph-sdk = "^0.1.70"
 langgraph-cli = "^0.2.12"
 langgraph-api = "^0.2.45"
+matplotlib = "^3.10.3"
+seaborn = "^0.13.2"
 
 
 [tool.poetry.group.dev.dependencies]

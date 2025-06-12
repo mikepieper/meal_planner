@@ -116,7 +116,16 @@ Respond in JSON format:
             return {"report": ValidationReport(
                 scenario_id=scenario.scenario_id,
                 goal_achieved=state.user_state.goal_achieved,
-                goal_achievement_score=0.5 if state.user_state.goal_achieved else 0.0
+                goal_achievement_score=0.5 if state.user_state.goal_achieved else 0.0,
+                efficiency_score=0.5,
+                clarity_score=0.5,
+                user_satisfaction_score=state.user_state.satisfaction_level,
+                total_turns=state.user_state.turn_count,
+                user_clarification_requests=state.user_state.asked_for_clarification,
+                bot_clarification_requests=0,
+                overall_score=0.5,
+                summary="Analysis failed, using fallback values",
+                recommendation="needs_improvement"
             )}
     
     def analyze_conversation_quality(state: ValidationState) -> Dict[str, Any]:

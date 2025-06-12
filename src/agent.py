@@ -163,7 +163,14 @@ Remember: You're here to make meal planning easy, enjoyable, and personalized!""
         llm_messages = [SystemMessage(content=AGENT_PROMPT)]
 
         # Add phase-specific guidance
-        phase = state.get("conversation_context", {}).planning_phase
+        conv_context = state.get("conversation_context", {})
+        if hasattr(conv_context, 'planning_phase'):
+            phase = conv_context.planning_phase
+        elif isinstance(conv_context, dict):
+            phase = conv_context.get('planning_phase')
+        else:
+            phase = None
+            
         if phase:
             phase_guidance = get_phase_guidance(phase, state)
             if phase_guidance:
