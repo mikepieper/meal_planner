@@ -14,14 +14,19 @@ An intelligent, conversational meal planning assistant that combines LangGraph's
 ## 📁 Project Structure
 
 ```
-src/meal_planner/
-├── main_agent.py           # Main integrated agent with all tools
-├── nutrition_optimizer.py  # Hill climbing optimization for meals
-├── studio/                # LangGraph Studio configuration
-│   └── langgraph.json
-├── nbs/                   # Jupyter notebooks for demos
-│   ├── integrated_demo.ipynb
-│   └── react_meal_planner_demo.ipynb
+src/
+├── agent.py               # Main meal planning agent
+├── tools.py               # All available tools
+├── models.py              # Data models and state definitions
+├── food_database.py       # Food nutrition database
+├── nutrition_optimizer.py # Hill climbing optimization
+├── testing/               # Automated testing framework
+│   ├── test_scenarios.py  # Test case definitions
+│   ├── user_agent.py      # User simulation agent
+│   ├── validation_agent.py # Conversation analyzer
+│   └── test_runner.py     # Test orchestration
+├── notebooks/             # Jupyter notebooks
+│   └── automated_testing.ipynb
 └── DESIGN_OVERVIEW.md     # Detailed design documentation
 ```
 
@@ -66,6 +71,29 @@ The agent has access to several tools:
 5. **`save_meal_to_plan`**: Adds meals to the daily plan
 
 ## 🧪 Testing
+
+### Automated Testing Framework
+
+The project includes a comprehensive automated testing framework that simulates user interactions and evaluates chatbot performance:
+
+```bash
+# List available test scenarios
+python run_tests.py list
+
+# Run a single test
+python run_tests.py run --scenario busy_professional_weekly
+
+# Run all tests
+python run_tests.py run --all
+```
+
+The framework includes:
+- **User Simulation**: AI agents that act like real users with different personalities
+- **Goal Achievement Analysis**: Validates if user goals were met
+- **Conversation Quality Metrics**: Measures efficiency, clarity, and satisfaction
+- **Automated Reporting**: Generates detailed reports with improvement suggestions
+
+See `src/testing/README.md` for detailed documentation.
 
 ### Run the test suite
 
