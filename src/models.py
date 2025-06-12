@@ -124,6 +124,9 @@ class MealPlannerState(TypedDict):
     
     # Current meal being edited (for context)
     current_meal: Literal["breakfast", "lunch", "dinner", "snacks"]
+    
+    # Running nutrition totals
+    current_totals: Optional[NutritionInfo]
 
 
 def create_initial_state() -> MealPlannerState:
@@ -137,5 +140,6 @@ def create_initial_state() -> MealPlannerState:
         "user_profile": UserProfile(),
         "nutrition_goals": None,
         "conversation_context": ConversationContext(),
-        "current_meal": "breakfast"
+        "current_meal": "breakfast",
+        "current_totals": None
     }
