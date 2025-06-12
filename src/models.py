@@ -38,65 +38,54 @@ class FoodItem(BaseModel):
 
 class MealItem(BaseModel):
     """Information about a single item in a meal."""
-    amount: str = Field(..., description="The quantity of the food item (e.g., '1', '1/2', 'two').")
-    measure: Optional[str] = Field("unit", description="The unit of measurement (e.g., 'cup', 'oz', 'grams', 'piece').")
-    food: str = Field(..., description="The name of the food item (e.g., 'grapes', 'chicken breast', 'olive oil').")
-
-class Meal(BaseModel):
-    """Represents a meal with multiple food items."""
-    name: str = Field(..., description="The name of the meal (e.g., 'breakfast', 'lunch', 'dinner', 'snack').")
-    meal_type: Literal["breakfast", "lunch", "dinner", "snack"]
-    meal_items: List[MealItem]
-    
-    def calculate_nutrition(self, food_db: Dict[str, FoodItem]) -> Dict[str, float]:
-        """Calculate total nutrition for the meal."""
-        totals = {"calories": 0, "fat": 0, "carbohydrates": 0, "protein": 0}
-        for food_id, quantity in self.foods.items():
-            if (food := food_db.get(food_id)) is not None:
-                totals["calories"] += food.calories * quantity
-                totals["fat"] += food.fat * quantity
-                totals["carbohydrates"] += food.carbohydrates * quantity
-                totals["protein"] += food.protein * quantity
-        return totals
+    food: str = Field(..., description="The name of the food item")
+    amount: str = Field(..., description="The quantity (e.g., '1', '2', '1/2')")
+    unit: str = Field("serving", description="The unit (e.g., 'cup', 'oz', 'large', 'slice')")
 
 
-class MealPlan(BaseModel):
-    """Complete meal plan for a day."""
-    breakfast: Optional[Meal] = None
-    lunch: Optional[Meal] = None
-    dinner: Optional[Meal] = None
-    snacks: List[Meal] = Field(default_factory=list)
-    
-    def calculate_daily_nutrition(self, food_db: Dict[str, FoodItem]) -> Dict[str, float]:
-        """Calculate total nutrition for the day."""
-        totals = {"calories": 0, "fat": 0, "carbohydrates": 0, "protein": 0}
-        
-        for meal in [self.breakfast, self.lunch, self.dinner] + self.snacks:
-            if meal:
-                meal_nutrition = meal.calculate_nutrition(food_db)
-                for nutrient, value in meal_nutrition.items():
-                    totals[nutrient] += value
-        
-        return totals
+class NutritionInfo(BaseModel):
+    """Nutritional information."""
+    calories: float = Field(0, description="Calories")
+    protein: float = Field(0, description="Protein in grams")
+    carbohydrates: float = Field(0, description="Carbohydrates in grams")
+    fat: float = Field(0, description="Fat in grams")
+
+
+class NutritionGoals(BaseModel):
+    """Daily nutrition goals."""
+    daily_calories: int = Field(..., description="Target daily calories")
+    diet_type: str = Field("balanced", description="Diet type: balanced, high-protein, low-carb, etc.")
+    protein_target: Optional[float] = Field(None, description="Daily protein target in grams")
+    carb_target: Optional[float] = Field(None, description="Daily carb target in grams")
+    fat_target: Optional[float] = Field(None, description="Daily fat target in grams")
+
 
 class UserProfile(BaseModel):
     """User profile containing preferences and nutrition information."""
-    daily_calories: Optional[int] = Field(None, description="Daily caloric target if specified")
-    diet_type: Optional[str] = Field("balanced", description="Diet type: balanced, high_protein, low_carb, etc.")
     dietary_restrictions: List[str] = Field(default_factory=list, description="Allergies, intolerances, preferences")
-    nutrition_goals: Optional[ConstraintSet] = Field(None, description="Calculated nutrition constraints")
-    automation_preference: Optional[Literal["manual", "assisted", "automated"]] = Field(
-        None, 
-        description="User's preference for meal planning assistance level"
-    )
+    preferred_cuisines: List[str] = Field(default_factory=list, description="Favorite cuisine types")
+    cooking_time_preference: Optional[str] = Field(None, description="Quick, moderate, or extensive")
+    health_goals: List[str] = Field(default_factory=list, description="Weight loss, muscle gain, etc.")
 
-# ========== State Definitions ==========
+
+# ========== State Definition ==========
 
 class MealPlannerState(TypedDict):
-    """Main state for the meal planning agent."""
+    """Main state for the meal planning agent - simplified version."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    current_meal_plan: MealPlan
-    user_profile: UserProfile  # dietary restrictions, preferences, nutrition goals
-    food_database: Dict[str, FoodItem]
-    conversation_phase: str
-    optimization_history: List[Dict[str, Any]]
+    
+    # Simple meal storage - just lists of MealItems
+    breakfast: List[MealItem]
+    lunch: List[MealItem] 
+    dinner: List[MealItem]
+    snacks: List[MealItem]
+    
+    # User information
+    user_profile: UserProfile
+    nutrition_goals: Optional[NutritionGoals]
+    
+    # Conversation tracking
+    conversation_context: Dict[str, Any]
+    
+    # Current meal being edited (for context)
+    current_meal: Literal["breakfast", "lunch", "dinner", "snacks"]

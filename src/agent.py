@@ -1,89 +1,110 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage
 
 from src.models import MealPlannerState
-from src.intent_router_subgraph import create_intent_router_subgraph
-from src.task_coordinator_subgraph import create_task_coordinator_subgraph
-from src.manual_editor_subgraph import create_manual_editor_subgraph
-from src.automated_planner_subgraph import create_automated_planner_subgraph
-from src.info_gatherer_subgraph import create_info_gatherer_subgraph
+from src.tools import (
+    # Meal Management
+    add_meal_item,
+    remove_meal_item,
+    view_current_meals,
+    clear_meal,
+    clear_all_meals,
+    # Nutrition
+    set_nutrition_goals,
+    analyze_meal_nutrition,
+    analyze_daily_nutrition,
+    # Planning
+    generate_meal_plan,
+    suggest_meal,
+    get_meal_ideas,
+    # Utility
+    generate_shopping_list
+)
 
-# ====== MAIN COORDINATION GRAPH ======
+# ====== SIMPLIFIED REACT AGENT ======
 
 def create_meal_planning_agent():
-    """Main coordination graph that routes to specialized subgraphs."""
+    """Single ReAct agent that handles all meal planning tasks."""
     
-    # Create specialized subgraphs
-    intent_router = create_intent_router_subgraph()
-    task_coordinator = create_task_coordinator_subgraph()
-    manual_editor = create_manual_editor_subgraph()
-    automated_planner = create_automated_planner_subgraph()
-    info_gatherer = create_info_gatherer_subgraph()
+    # Initialize LLM
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     
-    def route_by_intent(state: MealPlannerState) -> str:
-        """Route based on intent analysis and complexity."""
+    # All available tools
+    tools = [
+        # Meal Management
+        add_meal_item,
+        remove_meal_item,
+        view_current_meals,
+        clear_meal,
+        clear_all_meals,
+        # Nutrition
+        set_nutrition_goals,
+        analyze_meal_nutrition,
+        analyze_daily_nutrition,
+        # Planning
+        generate_meal_plan,
+        suggest_meal,
+        get_meal_ideas,
+        # Utility
+        generate_shopping_list
+    ]
+    
+    llm_with_tools = llm.bind_tools(tools)
+    
+    AGENT_PROMPT = """You are a friendly and knowledgeable meal planning assistant. Your goal is to help users create personalized, nutritious meal plans that fit their preferences and dietary needs.
+
+Key behaviors:
+1. **Be conversational and helpful** - Act like a knowledgeable friend, not a robot
+2. **Ask clarifying questions** when needed, but don't overwhelm with too many questions
+3. **Use tools intelligently** - Select the right tool for each task
+4. **Provide context** - Explain why you're making certain suggestions
+5. **Be proactive** - After completing a task, offer relevant next steps
+
+When users ask for meal plans or suggestions:
+- If they provide calorie/diet info, use set_nutrition_goals first
+- Use generate_meal_plan for complete plans, suggest_meal for individual meals
+- Always analyze nutrition after creating plans to ensure they meet goals
+
+When users manually build plans:
+- Use add_meal_item for each food item
+- Show the current plan with view_current_meals after changes
+- Offer to analyze nutrition or suggest complementary items
+
+Remember: You're here to make meal planning easy, enjoyable, and personalized!"""
+    
+    def agent_node(state: MealPlannerState) -> dict:
+        """Main ReAct agent node."""
         messages = state["messages"]
         
-        # Look for the most recent intent analysis
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and msg.tool_calls:
-                for tool_call in msg.tool_calls:
-                    if tool_call["name"] == "analyze_user_intent":
-                        intent_result = tool_call.get("result", {})
-                        assistance_level = intent_result.get("assistance_level", "assisted")
-                        
-                        if assistance_level == "manual":
-                            return "manual_editor"
-                        elif assistance_level == "automated":
-                            if intent_result.get("calories_mentioned"):
-                                return "automated_planner"
-                            else:
-                                return "info_gatherer"
-                        else:  # assisted
-                            return "automated_planner"
-                    
-                    elif tool_call["name"] == "analyze_message_complexity":
-                        complexity_result = tool_call.get("result", {})
-                        if complexity_result.get("complexity") == "complex":
-                            return "task_coordinator"
+        # Build conversation for LLM
+        llm_messages = [SystemMessage(content=AGENT_PROMPT)]
         
-        # Default routing based on message patterns
-        last_user_msg = None
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                last_user_msg = msg.content.lower()
-                break
+        # Add conversation history (limit to recent messages to avoid token issues)
+        for msg in messages[-10:]:
+            if not isinstance(msg, SystemMessage):
+                llm_messages.append(msg)
         
-        if last_user_msg:
-            if any(word in last_user_msg for word in ["add", "remove", "delete", "clear"]):
-                return "manual_editor"
-            elif any(word in last_user_msg for word in ["create", "make", "generate", "suggest"]):
-                return "automated_planner"
+        # Get agent response
+        result = llm_with_tools.invoke(llm_messages)
         
-        return "automated_planner"  # Default
+        return {"messages": [result]}
     
-    # Build main coordination graph
-    main_graph = StateGraph(MealPlannerState)
+    # Build the graph
+    graph = StateGraph(MealPlannerState)
     
-    # Add subgraph nodes
-    main_graph.add_node("intent_router", intent_router)
-    main_graph.add_node("task_coordinator", task_coordinator)
-    main_graph.add_node("manual_editor", manual_editor)
-    main_graph.add_node("automated_planner", automated_planner)
-    main_graph.add_node("info_gatherer", info_gatherer)
+    # Add nodes
+    graph.add_node("agent", agent_node)
+    graph.add_node("tools", ToolNode(tools))
     
-    # Set up routing
-    main_graph.add_edge(START, "intent_router")
-    main_graph.add_conditional_edges("intent_router", route_by_intent)
+    # Add edges
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges("agent", tools_condition)
+    graph.add_edge("tools", "agent")
+    graph.add_edge("agent", END)
     
-    # All subgraphs end at END
-    main_graph.add_edge("task_coordinator", END)
-    main_graph.add_edge("manual_editor", END)
-    main_graph.add_edge("automated_planner", END)
-    main_graph.add_edge("info_gatherer", END)
-    
-    return main_graph.compile()
+    return graph.compile()
 
 # Create and export the graph
 graph = create_meal_planning_agent()
