@@ -220,47 +220,6 @@ def set_nutrition_goals(
 
 # === ANALYSIS & PLANNING TOOLS ===
 
-@tool
-def analyze_message_complexity(
-    user_message: str
-) -> Dict[str, Any]:
-    """Analyze if a message contains multiple intents and determine complexity."""
-    
-    prompt = f"""Analyze this user message for meal planning complexity:
-
-User message: "{user_message}"
-
-Determine:
-1. Number of distinct intents/requests
-2. Whether planning/decomposition is needed
-3. Which tasks can be parallelized vs must be sequential
-4. Overall complexity level
-
-Respond in JSON:
-{{
-    "intent_count": <number>,
-    "complexity": "simple" | "moderate" | "complex",
-    "needs_planning": true | false,
-    "intents": [
-        {{
-            "type": "meal_modification" | "meal_generation" | "nutrition_setup" | "information_request",
-            "description": "<brief description>",
-            "dependencies": [], // list of other intent indices this depends on
-            "can_parallelize": true | false
-        }}
-    ]
-}}"""
-    
-    response = analysis_llm.invoke(prompt)
-    try:
-        return json.loads(response.content)
-    except json.JSONDecodeError:
-        return {
-            "intent_count": 1,
-            "complexity": "simple", 
-            "needs_planning": False,
-            "intents": [{"type": "meal_modification", "description": "Single request", "dependencies": [], "can_parallelize": False}]
-        }
 
 @tool
 def create_execution_plan(
