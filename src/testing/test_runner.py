@@ -18,7 +18,6 @@ except ImportError:
 from src.testing.user_agent import user_agent, initialize_user_state, UserAgentState
 from src.testing.validation_agent import validation_agent, ValidationState, save_validation_report, ValidationReport
 from src.agent import graph as meal_planning_graph
-from src.models import create_initial_state
 
 
 class TestRunner:
@@ -124,19 +123,10 @@ class TestRunner:
             print(f"User: {last_user_msg}")
             
             # Send to chatbot
-            # Initialize proper state on first turn
-            if turn_count == 0:
-                initial_state = create_initial_state()
-                initial_state["messages"] = [HumanMessage(content=last_user_msg)]
-                chatbot_response = await self.meal_planning_agent.ainvoke(
-                    initial_state,
-                    config=chatbot_config
-                )
-            else:
-                chatbot_response = await self.meal_planning_agent.ainvoke(
-                    {"messages": [HumanMessage(content=last_user_msg)]},
-                    config=chatbot_config
-                )
+            chatbot_response = await self.meal_planning_agent.ainvoke(
+                {"messages": [HumanMessage(content=last_user_msg)]},
+                config=chatbot_config
+            )
             
             # Get assistant response
             assistant_msg = chatbot_response["messages"][-1]

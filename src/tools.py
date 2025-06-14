@@ -17,35 +17,6 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
 # === NUTRITION HELPERS ===
 
-def calculate_meal_totals(state: MealPlannerState) -> NutritionInfo:
-    """Calculate total nutrition from all meals in state."""
-    all_items = []
-    for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
-        for item in state[meal_type]:
-            all_items.append(f"{item.amount} {item.unit} of {item.food}")
-
-    if not all_items:
-        return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
-
-    # Use LLM to estimate totals
-    prompt = f"""Estimate the total nutritional content for all these items:
-{chr(10).join(all_items)}
-
-Respond ONLY with a JSON object in this exact format:
-{{"calories": 1500, "protein": 75, "carbohydrates": 180, "fat": 50}}"""
-
-    try:
-        response = llm.invoke(prompt)
-        data = json.loads(response.content)
-        return NutritionInfo(
-            calories=data["calories"],
-            protein=data["protein"],
-            carbohydrates=data["carbohydrates"],
-            fat=data["fat"]
-        )
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
-
 
 def is_food_allowed(food: str, dietary_restrictions: List[str]) -> bool:
     """Check if a food item is allowed based on dietary restrictions."""
@@ -87,19 +58,19 @@ If violation, respond with just the restriction name (e.g., "vegetarian", "glute
 def should_progress_to_optimizing(state: MealPlannerState) -> bool:
     """Check if we should move to optimizing phase."""
     # Count meals with items
-    meals_with_items = sum(1 for meal in ["breakfast", "lunch", "dinner"] if state.get(meal))
+    meals_with_items = sum(1 for meal in ["breakfast", "lunch", "dinner"] if getattr(state, meal))
 
     # Progress if we have at least 2 meals planned and nutrition goals
-    return meals_with_items >= 2 and state.get("nutrition_goals") is not None
+    return meals_with_items >= 2 and state.nutrition_goals is not None
 
 
 def should_progress_to_complete(state: MealPlannerState) -> bool:
     """Check if we should move to complete phase."""
-    if not state.get("current_totals") or not state.get("nutrition_goals"):
+    if not state.current_totals or not state.nutrition_goals:
         return False
 
-    totals = state["current_totals"]
-    goals = state["nutrition_goals"]
+    totals = state.current_totals
+    goals = state.nutrition_goals
 
     # Complete if we're within 10% of calorie goal
     calorie_percent = totals.calories / goals.daily_calories
@@ -127,17 +98,15 @@ def add_meal_item(
     new_item = MealItem(food=food, amount=amount, unit=unit)
     updated_meal = state[meal_type] + [new_item]
 
-    # Calculate new totals
-    temp_state = dict(state)
-    temp_state[meal_type] = updated_meal
-    new_totals = calculate_meal_totals(temp_state)
-
-    # Update phase if needed
+    # Update phase if needed - use a temporary state to check phase transitions
+    temp_state = state.model_copy()
+    setattr(temp_state, meal_type, updated_meal)
+    
     context = state["conversation_context"]
     new_context = context.model_copy()
 
     # Progress phase based on state
-    if new_context.planning_phase == "gathering_info" and state.get("nutrition_goals"):
+    if new_context.planning_phase == "gathering_info" and state.nutrition_goals:
         new_context.planning_phase = "building_meals"
     elif new_context.planning_phase == "setting_goals":
         new_context.planning_phase = "building_meals"
@@ -150,7 +119,6 @@ def add_meal_item(
         update={
             meal_type: updated_meal,
             "current_meal": meal_type,
-            "current_totals": new_totals,
             "conversation_context": new_context
         }
     )
@@ -186,12 +154,10 @@ def add_multiple_items(
     # Add all allowed items to the meal
     updated_meal = state[meal_type] + new_items
 
-    # Calculate new totals
-    temp_state = dict(state)
-    temp_state[meal_type] = updated_meal
-    new_totals = calculate_meal_totals(temp_state)
-
-    # Update planning phase if appropriate
+    # Update planning phase if appropriate - use temporary state to check transitions
+    temp_state = state.model_copy()
+    setattr(temp_state, meal_type, updated_meal)
+    
     context = state["conversation_context"]
     new_context = context.model_copy()
 
@@ -207,8 +173,7 @@ def add_multiple_items(
         update={
             meal_type: updated_meal,
             "current_meal": meal_type,
-            "conversation_context": new_context,
-            "current_totals": new_totals
+            "conversation_context": new_context
         }
     )
 
@@ -245,12 +210,10 @@ def add_meal_from_suggestion(
     # Add all items from the suggestion
     updated_meal = state[meal_type] + allowed_items
 
-    # Calculate new totals
-    temp_state = dict(state)
-    temp_state[meal_type] = updated_meal
-    new_totals = calculate_meal_totals(temp_state)
-
-    # Update planning phase if we're starting to build meals
+    # Update planning phase if we're starting to build meals - use temporary state to check transitions
+    temp_state = state.model_copy()
+    setattr(temp_state, meal_type, updated_meal)
+    
     new_context = context.model_copy()
 
     # Progress phase based on state
@@ -265,8 +228,7 @@ def add_meal_from_suggestion(
         update={
             meal_type: updated_meal,
             "current_meal": meal_type,
-            "conversation_context": new_context,
-            "current_totals": new_totals
+            "conversation_context": new_context
         }
     )
 
@@ -294,16 +256,10 @@ def remove_meal_item(
         # Return command with no updates but a message
         return Command(update={})
 
-    # Calculate new totals
-    temp_state = dict(state)
-    temp_state[meal_type] = updated_meal
-    new_totals = calculate_meal_totals(temp_state)
-
     return Command(
         update={
             meal_type: updated_meal,
-            "current_meal": meal_type,
-            "current_totals": new_totals
+            "current_meal": meal_type
         }
     )
 
@@ -327,8 +283,8 @@ def view_current_meals(
             result += f"**{meal_type.capitalize()}:** Empty\n\n"
 
     # Add current nutrition totals if available
-    if state.get("current_totals"):
-        totals = state["current_totals"]
+    if state.current_totals:
+        totals = state.current_totals
         result += "\n**Current Daily Totals:**\n"
         result += f"- Calories: {totals.calories:.0f}\n"
         result += f"- Protein: {totals.protein:.0f}g\n"
@@ -354,16 +310,10 @@ def clear_meal(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
     """Clear all items from a specific meal."""
-    # Calculate new totals
-    temp_state = dict(state)
-    temp_state[meal_type] = []
-    new_totals = calculate_meal_totals(temp_state)
-
     return Command(
         update={
             meal_type: [],
-            "current_meal": meal_type,
-            "current_totals": new_totals
+            "current_meal": meal_type
         }
     )
 
@@ -380,8 +330,7 @@ def clear_all_meals(
             "lunch": [],
             "dinner": [],
             "snacks": [],
-            "current_meal": "breakfast",
-            "current_totals": NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
+            "current_meal": "breakfast"
         }
     )
 
@@ -521,8 +470,8 @@ def analyze_daily_nutrition(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
     """Analyze total daily nutritional content and compare to goals."""
-    if state.get("current_totals"):
-        totals = state["current_totals"]
+    if state.current_totals:
+        totals = state.current_totals
         result = "**Daily Nutrition Analysis:**\n\n"
         result += "**Current Totals:**\n"
         result += f"- Calories: {totals.calories:.0f}\n"
@@ -564,11 +513,11 @@ def suggest_foods_to_meet_goals(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
     """Suggest foods that would help meet remaining nutrition goals."""
-    if not state.get("nutrition_goals") or not state.get("current_totals"):
+    if not state.get("nutrition_goals") or not state.current_totals:
         return "Please set nutrition goals first to get targeted suggestions."
 
     goals = state["nutrition_goals"]
-    totals = state["current_totals"]
+    totals = state.current_totals
     restrictions = state["user_profile"].dietary_restrictions
 
     # Calculate what's needed
@@ -604,7 +553,7 @@ def generate_remaining_meals(
     """Generate meals only for empty meal slots, preserving existing meals."""
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
-    current_totals = state.get("current_totals", NutritionInfo())
+    current_totals = state.current_totals
 
     # Determine which meals to generate
     if meal_types is None:
@@ -696,17 +645,19 @@ Generate meals with specific portions. Format as JSON:
                             ))
                     temp_state[meal_type] = items
 
-            # Calculate new totals
-            new_totals = calculate_meal_totals(temp_state)
+            # Create a full temp state for checking phase transitions
+            full_temp_state = state.model_copy()
+            for meal_type in meal_types:
+                if meal_type in temp_state:
+                    setattr(full_temp_state, meal_type, temp_state[meal_type])
 
             # Check if we should be in complete phase
-            if should_progress_to_complete({"current_totals": new_totals, "nutrition_goals": nutrition_goals}):
+            if should_progress_to_complete(full_temp_state):
                 new_context.planning_phase = "complete"
 
             # Build updates - only for meals we generated
             updates = {
-                "conversation_context": new_context,
-                "current_totals": new_totals
+                "conversation_context": new_context
             }
             for meal_type in meal_types:
                 if meal_type in temp_state:
@@ -818,16 +769,17 @@ For each meal, format as a JSON list of items:
                 else:
                     temp_state[meal_type] = []
 
-            # Calculate totals for the new meal plan
-            new_totals = calculate_meal_totals(temp_state)
+            # Create full temp state for checking phase transitions
+            full_temp_state = state.model_copy()
+            for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
+                setattr(full_temp_state, meal_type, temp_state[meal_type])
 
             # Check if we should be in complete phase
-            if should_progress_to_complete({"current_totals": new_totals, "nutrition_goals": nutrition_goals}):
+            if should_progress_to_complete(full_temp_state):
                 new_context.planning_phase = "complete"
 
             updates = {
-                "conversation_context": new_context,
-                "current_totals": new_totals
+                "conversation_context": new_context
             }
             for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
                 updates[meal_type] = temp_state[meal_type]
@@ -844,8 +796,7 @@ For each meal, format as a JSON list of items:
             "lunch": [],
             "dinner": [],
             "snacks": [],
-            "conversation_context": new_context,
-            "current_totals": NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
+            "conversation_context": new_context
         }
     )
 
@@ -860,7 +811,7 @@ def suggest_meal(
     """Suggest options for a specific meal based on preferences and remaining nutrition needs."""
     user_profile = state.get("user_profile", {})
     nutrition_goals = state.get("nutrition_goals")
-    current_totals = state.get("current_totals")
+    current_totals = state.current_totals
 
     context = f"Suggest 3 different {meal_type} options.\n\n"
 

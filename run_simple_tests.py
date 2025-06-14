@@ -5,6 +5,10 @@ import asyncio
 import argparse
 import sys
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from src.testing import TestRunner
 from src.testing.simple_test_scenarios import (

@@ -1,7 +1,9 @@
 from typing import TypedDict, List, Dict, Any, Optional, Literal, Annotated, Sequence
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from langgraph.graph import add_messages
 from langchain_core.messages import BaseMessage
+import re
+from fractions import Fraction
 
 
 # ========== Pydantic Models ==========
@@ -50,7 +52,7 @@ class NutritionInfo(BaseModel):
     carbohydrates: float = Field(0, description="Carbohydrates in grams")
     fat: float = Field(0, description="Fat in grams")
 
-
+# TODO: Duplicate fields for constraints
 class NutritionGoals(BaseModel):
     """Daily nutrition goals."""
     daily_calories: int = Field(..., description="Target daily calories")
@@ -105,41 +107,116 @@ class ConversationContext(BaseModel):
 
 # ========== State Definition ==========
 
-class MealPlannerState(TypedDict):
-    """Main state for the meal planning agent - simplified version."""
-    messages: Annotated[Sequence[BaseMessage], add_messages]
+class MealPlannerState(BaseModel):
+    """Main state for the meal planning agent - using Pydantic for proper defaults."""
+    messages: Annotated[Sequence[BaseMessage], add_messages] = Field(default_factory=list)
+
+    # Conversation summary for managing long conversations
+    summary: str = Field("", description="Summary of earlier conversation history")
 
     # Simple meal storage - just lists of MealItems
-    breakfast: List[MealItem]
-    lunch: List[MealItem]
-    dinner: List[MealItem]
-    snacks: List[MealItem]
+    breakfast: List[MealItem] = Field(default_factory=list)
+    lunch: List[MealItem] = Field(default_factory=list)
+    dinner: List[MealItem] = Field(default_factory=list)
+    snacks: List[MealItem] = Field(default_factory=list)
 
     # User information
-    user_profile: UserProfile
-    nutrition_goals: Optional[NutritionGoals]
+    user_profile: UserProfile = Field(default_factory=UserProfile)
+    nutrition_goals: Optional[NutritionGoals] = None
 
     # Enhanced conversation tracking
-    conversation_context: ConversationContext
+    conversation_context: ConversationContext = Field(default_factory=ConversationContext)
 
     # Current meal being edited (for context)
-    current_meal: Literal["breakfast", "lunch", "dinner", "snacks"]
+    current_meal: Literal["breakfast", "lunch", "dinner", "snacks"] = "breakfast"
 
-    # Running nutrition totals
-    current_totals: Optional[NutritionInfo]
+    # Running nutrition totals - now computed automatically
+    # current_totals: Optional[NutritionInfo] = None
 
+    def _parse_amount(self, amount_str: str) -> float:
+        """Parse amount string to float, handling fractions like '1/2', '1 1/2'."""
+        amount_str = amount_str.strip()
+        
+        # Handle mixed numbers like "1 1/2"
+        mixed_match = re.match(r'^(\d+)\s+(\d+)/(\d+)$', amount_str)
+        if mixed_match:
+            whole, num, den = mixed_match.groups()
+            return float(whole) + float(num) / float(den)
+        
+        # Handle simple fractions like "1/2"
+        if '/' in amount_str:
+            try:
+                return float(Fraction(amount_str))
+            except ValueError:
+                pass
+        
+        # Handle decimals and whole numbers
+        try:
+            return float(amount_str)
+        except ValueError:
+            # Default to 1 if we can't parse
+            return 1.0
 
-def create_initial_state() -> MealPlannerState:
-    """Create initial state with proper defaults."""
-    return {
-        "messages": [],
-        "breakfast": [],
-        "lunch": [],
-        "dinner": [],
-        "snacks": [],
-        "user_profile": UserProfile(),
-        "nutrition_goals": None,
-        "conversation_context": ConversationContext(),
-        "current_meal": "breakfast",
-        "current_totals": None
-    }
+    def _get_food_database(self) -> Dict[str, 'FoodItem']:
+        """Get the food database. Import here to avoid circular imports."""
+        try:
+            from .food_database import get_food_database
+            return get_food_database()
+        except ImportError:
+            return {}
+
+    def _calculate_item_nutrition(self, item: MealItem, food_db: Dict[str, 'FoodItem']) -> NutritionInfo:
+        """Calculate nutrition for a single meal item using the food database."""
+        # Try to find exact match first
+        food_item = None
+        food_key = item.food.lower().replace(' ', '_')
+        
+        # Look for exact match by ID
+        if food_key in food_db:
+            food_item = food_db[food_key]
+        else:
+            # Look for name match
+            for fid, fitem in food_db.items():
+                if fitem.name.lower() == item.food.lower():
+                    food_item = fitem
+                    break
+        
+        if not food_item:
+            # If not found in database, return zero nutrition
+            # In a real app, you might want to log this or use LLM as fallback
+            return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
+        
+        # Parse the amount
+        multiplier = self._parse_amount(item.amount)
+        
+        # Calculate nutrition based on the multiplier
+        return NutritionInfo(
+            calories=food_item.calories * multiplier,
+            protein=food_item.protein * multiplier,
+            carbohydrates=food_item.carbohydrates * multiplier,
+            fat=food_item.fat * multiplier
+        )
+
+    def calculate_nutrition_totals(self) -> NutritionInfo:
+        """Calculate total nutrition from all meals using the food database."""
+        food_db = self._get_food_database()
+        
+        total = NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
+        
+        # Sum up all meals
+        for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
+            meal_items = getattr(self, meal_type, [])
+            for item in meal_items:
+                item_nutrition = self._calculate_item_nutrition(item, food_db)
+                total.calories += item_nutrition.calories
+                total.protein += item_nutrition.protein
+                total.carbohydrates += item_nutrition.carbohydrates
+                total.fat += item_nutrition.fat
+        
+        return total
+
+    @computed_field
+    @property
+    def current_totals(self) -> NutritionInfo:
+        """Automatically calculated nutrition totals (computed field)."""
+        return self.calculate_nutrition_totals()

@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional, Any
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
@@ -44,7 +45,17 @@ class UserAgentState(BaseModel):
 def create_user_agent():
     """Create a user simulation agent."""
     
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    # Use Claude for user agent - better at following adversarial instructions without being helpful
+    import os
+    anthropic_key = os.getenv("ANTHROPIC_KEY") or os.getenv("ANTHROPIC_API_KEY")
+    llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", temperature=0.7, api_key=anthropic_key)
+    
+    def get_response_content(response):
+        """Extract content from LLM response, handling different formats."""
+        if isinstance(response.content, list):
+            return response.content[0].text if response.content else ""
+        else:
+            return response.content
     
     def generate_user_response(state: UserAgentState) -> Dict[str, Any]:
         """Generate the next user message based on persona and conversation state."""
@@ -77,48 +88,54 @@ CURRENT STATE:
 - Confusion: {state.confusion_level:.1f}
 - Impatience: {state.impatience_level:.1f}
 
-CRITICAL RULES - YOU ARE THE USER WHO NEEDS HELP:
+STRICT FORBIDDEN BEHAVIORS - NEVER DO THESE:
 
-1. **You are NOT helpful or accommodating** - you have your own needs and problems to solve
-2. **You do NOT offer help to the chatbot** - the chatbot should help YOU
-3. **You are focused on YOUR goal** - be demanding about getting what you need
-4. **You are realistic and sometimes difficult** - real users aren't always pleasant
-5. **You don't say "let me know if you need anything"** - YOU need things from the bot
+1. **NEVER repeat a previous message** - each response must be unique and move the conversation forward
+2. **NEVER ask the chatbot questions** - you make statements and demands, not questions to the bot
+3. **NEVER thank the chatbot** - real users don't constantly thank bots, especially when frustrated
+4. **NEVER offer help to the chatbot** - you are the customer who needs help
+5. **NEVER say "let me know if you need anything"** - the BOT should ask if YOU need anything
+6. **NEVER be accommodating or polite when you're not getting what you want**
 
-BEHAVIORAL GUIDELINES:
+REQUIRED BEHAVIORS - YOU MUST:
 
-1. **Communication Style**:
-   - Direct: "I need X. Can you do that or not?"
-   - Chatty: "So I'm trying to do X because Y, and I really need help with Z..."
-   - Uncertain: "I think I need X? But I'm not sure if that's right..."
+1. **Make demands and statements** - "I need X", "Do Y", "Give me Z"
+2. **Express frustration when things aren't working** - "This isn't what I asked for"
+3. **Push for your specific goal** - "But I said I wanted..."
+4. **Respond to what the bot actually said** - don't ignore their response
+5. **Show impatience if the bot is slow or unclear** - "Just get to the point"
+6. **Make decisions when presented with options** - pick something or reject it
 
-2. **Decision Making**:
-   - Decisive: Make quick choices, move forward fast
-   - Indecisive: "Actually, wait, maybe not that... what about...?"
-   - Exploratory: "What are my other options? I want to see everything first"
+COMMUNICATION PATTERNS:
 
-3. **Emotional Responses**:
-   - If confused: "I don't understand what you mean" or "That doesn't make sense"
-   - If impatient: "This is taking too long" or "Can we just get to the point?"
-   - If satisfied: "Perfect, that's exactly what I wanted" or "Great, what's next?"
+1. **Direct**: "I need X. Do it." / "That's not right." / "Fine, do Y instead."
+2. **Chatty**: "So I'm trying to do X and it's really important because Y..." / "The thing is..."
+3. **Uncertain**: "I think I want X... but is that right?" / "I'm not sure if..."
 
-4. **User Behavior**:
-   - Push for what you want: "But I specifically said I need..."
-   - Question unclear responses: "What do you mean by that?"
-   - Redirect when off-topic: "That's not what I asked for"
-   - Express frustration when appropriate: "This isn't working for me"
+EMOTIONAL RESPONSES:
 
-5. **Goal-Oriented**:
-   - Keep pushing toward your specific goal
-   - Don't get sidetracked by the bot's agenda
-   - Express what you actually need, not what's polite
+- **If confused**: "What does that mean?" / "I don't get it" / "That makes no sense"
+- **If impatient**: "This is taking forever" / "Just do it already" / "Can we move on?"
+- **If satisfied**: "Good" / "That works" / "Finally" / "Yes, that's it"
+- **If frustrated**: "This isn't working" / "That's not what I said" / "Forget it"
 
-Remember: You're a REAL PERSON with problems to solve, not a customer service representative. Be authentic to {persona.name}'s personality and current emotional state. NEVER offer help to the chatbot - YOU are the one who needs help.
+Remember: You are {persona.name}, a real person with real problems to solve. You're not here to be nice to the chatbot - you're here to get help with YOUR goal. Be demanding, realistic, and focused on what YOU need.
+
+NEVER repeat previous messages. NEVER ask questions. NEVER thank the bot. NEVER offer help.
 
 Generate ONLY your next message as {persona.name} would realistically say it."""
 
+        # Combine system prompt with final reminder to avoid multiple system messages
+        combined_system_prompt = system_prompt + "\n\n" + """FINAL REMINDER - STRICT RULES:
+- NO QUESTIONS to the chatbot (no "Can you...", "Could you...", "Would you...")
+- NO THANKING the chatbot (no "thank you", "thanks")  
+- NO OFFERING HELP (no "let me know if you need anything")
+- MAKE DEMANDS, not requests ("Add eggs to breakfast", "Do this now")
+- BE IMPATIENT if the bot is slow or unclear
+- NEVER repeat previous messages"""
+        
         # Add conversation history
-        messages = [SystemMessage(content=system_prompt)]
+        messages = [SystemMessage(content=combined_system_prompt)]
         
         # Include recent conversation (limit to prevent token issues)
         for msg in state.messages[-10:]:
@@ -127,11 +144,93 @@ Generate ONLY your next message as {persona.name} would realistically say it."""
         # Get response
         response = llm.invoke(messages)
         
+        # Check for message repetition - if the new message is too similar to a previous user message, regenerate
+        previous_user_messages = [msg.content for msg in state.messages if isinstance(msg, HumanMessage)]
+        max_attempts = 3
+        attempts = 0
+        
+        while attempts < max_attempts:
+            response_content = get_response_content(response).strip()
+            
+            # Check for forbidden behaviors
+            is_invalid = False
+            violation_reason = ""
+            
+            # Check for repetition
+            for prev_msg in previous_user_messages:
+                if (len(response_content) > 10 and len(prev_msg) > 10 and 
+                    response_content.lower() in prev_msg.lower() or 
+                    prev_msg.lower() in response_content.lower()):
+                    is_invalid = True
+                    violation_reason = "repetitive message"
+                    break
+            
+            # Check for questions (ending with ? or starting with question words)
+            if not is_invalid:
+                question_indicators = ["?", "can you", "could you", "would you", "will you", "do you", "are you", "how do", "what do", "when do", "where do", "why do"]
+                response_lower = response_content.lower()
+                if any(indicator in response_lower for indicator in question_indicators):
+                    is_invalid = True
+                    violation_reason = "asking questions"
+            
+            # Check for thanking
+            if not is_invalid:
+                thank_phrases = ["thank", "thanks", "appreciate"]
+                if any(phrase in response_content.lower() for phrase in thank_phrases):
+                    is_invalid = True
+                    violation_reason = "thanking the bot"
+            
+            # Check for offering help
+            if not is_invalid:
+                help_offers = ["let me know if you need", "if you need anything", "happy to help", "here to help"]
+                if any(offer in response_content.lower() for offer in help_offers):
+                    is_invalid = True
+                    violation_reason = "offering help"
+            
+            if not is_invalid:
+                break
+            
+            # Debug logging for violations
+            print(f"  ⚠️  Attempt {attempts}: Regenerating due to {violation_reason}")
+            print(f"  📝 Invalid response: {response_content[:100]}...")
+            
+            # Regenerate with stronger violation-specific prompt
+            attempts += 1
+            violation_prompt = f"""CRITICAL VIOLATION: Your response was rejected for: {violation_reason}
+
+FORBIDDEN BEHAVIORS YOU MUST AVOID:
+- NO questions (no ?, no "Can you", "Could you", etc.)
+- NO thanking (no "thank you", "thanks")
+- NO offering help (no "let me know if you need anything")
+- NO repeating previous messages
+
+YOU ARE {persona.name} - A DEMANDING USER WHO NEEDS HELP.
+
+Your task: {scenario.specific_requirements.get('task', 'achieve your goal')}
+The assistant just said: "{state.messages[-1].content if state.messages else 'nothing yet'}"
+
+Generate a COMPLETELY DIFFERENT response that:
+1. Makes a DEMAND or STATEMENT (not a question)
+2. Shows impatience if the bot isn't helping
+3. Pushes for your specific goal
+4. NEVER asks questions or offers help
+
+Examples of good responses:
+- "Add eggs to my breakfast now."
+- "That's not what I asked for."
+- "Just do what I said."
+- "I need X. Do it."
+
+Be {persona.communication_style} and demanding."""
+            
+            response = llm.invoke([SystemMessage(content=violation_prompt)])
+        
         # Update emotional state based on conversation
-        new_state = update_emotional_state(state, response.content)
+        final_content = get_response_content(response)
+        new_state = update_emotional_state(state, final_content)
         
         return {
-            "messages": state.messages + [HumanMessage(content=response.content)],
+            "messages": state.messages + [HumanMessage(content=final_content)],
             **new_state
         }
     
@@ -185,11 +284,16 @@ Respond with a JSON object like:
     "progress_notes": "Brief explanation"
 }}"""
 
-        response = llm.invoke([SystemMessage(content=progress_prompt)])
+        eval_messages = [
+            SystemMessage(content="You are a conversation evaluator. Analyze conversations and determine if goals were achieved."),
+            HumanMessage(content=progress_prompt)
+        ]
+        
+        response = llm.invoke(eval_messages)
         
         # Parse response (in real implementation, use proper JSON parsing)
         # For now, simple heuristic
-        goal_achieved = "goal_achieved\": true" in response.content
+        goal_achieved = "goal_achieved\": true" in get_response_content(response)
         
         return {
             "goal_achieved": goal_achieved,
@@ -272,60 +376,83 @@ def initialize_user_state(scenario: TestScenario) -> UserAgentState:
     """Initialize user agent state with opening message."""
     
     persona = scenario.persona
+    task = scenario.specific_requirements.get('task', '')
     
-    # Generate appropriate opening based on goal and persona
-    opening_messages = {
-        ConversationGoal.CREATE_DAILY_PLAN: [
-            "Hi, I need help planning my meals for today",
-            "Can you help me create a meal plan for today?",
-            "I'd like to plan out what I'm eating today"
-        ],
-        ConversationGoal.CREATE_WEEKLY_PLAN: [
-            "I want to meal prep for the week",
-            "Can you help me plan meals for the next 7 days?",
-            "I need a weekly meal plan"
-        ],
-        ConversationGoal.FIND_SPECIFIC_MEAL: [
-            "I'm looking for meal ideas",
-            "Can you suggest something for dinner?",
-            "I need inspiration for lunch"
-        ],
-        ConversationGoal.MEET_NUTRITION_GOALS: [
-            "I have specific nutrition goals I'm trying to meet",
-            "I need help hitting my macros",
-            "Can you help me plan meals to meet my protein goals?"
-        ],
-        ConversationGoal.ACCOMMODATE_RESTRICTIONS: [
-            f"I'm {persona.dietary_restrictions[0]} and need meal ideas" if persona.dietary_restrictions else "I have dietary restrictions and need meal ideas",
-            f"I have dietary restrictions - {', '.join(persona.dietary_restrictions)}" if persona.dietary_restrictions else "I have some dietary restrictions",
-            "I need help finding meals that fit my dietary needs"
-        ],
-        ConversationGoal.QUICK_MEAL_IDEAS: [
-            "I need something quick to make",
-            "What can I cook in under 20 minutes?",
-            "I'm short on time, any quick meal ideas?"
-        ],
-        ConversationGoal.SHOPPING_LIST: [
-            "I need a shopping list for my meal plan",
-            "Can you create a grocery list for me?",
-            "What do I need to buy for these meals?"
-        ],
-        ConversationGoal.OPTIMIZE_EXISTING_PLAN: [
-            "I have some meals planned but want to improve them",
-            "Can you help me optimize my current meal plan?",
-            "I'm eating these foods but think I could do better nutritionally"
-        ]
-    }
-    
-    # Select opening based on communication style
-    openings = opening_messages.get(scenario.goal, ["Hi, I need help with meal planning"])
-    
-    if persona.communication_style == "chatty":
-        opening = random.choice(openings) + f" I'm {persona.name} by the way!"
-    elif persona.communication_style == "uncertain":
-        opening = "Um, " + random.choice(openings).lower() + "... if that's something you can help with?"
+    # Generate appropriate opening based on the specific task, not generic goals
+    if task:
+        # Use the specific task for a more demanding opening
+        if "add eggs to breakfast" in task.lower():
+            opening = "Add eggs to my breakfast"
+        elif "check calories" in task.lower():
+            opening = "Show me the calories in my current meals"
+        elif "clear breakfast" in task.lower():
+            opening = "Clear my breakfast. I want to start over"
+        elif "create a simple breakfast" in task.lower():
+            opening = "I need a quick healthy breakfast plan"
+        elif "gluten-free lunch" in task.lower():
+            opening = "I need a gluten-free lunch option"
+        elif "1500 calorie" in task.lower():
+            opening = "Set my daily goal to 1500 calories"
+        elif "full day meal plan" in task.lower():
+            opening = "Create a full day vegetarian meal plan for 1800 calories"
+        elif "increase protein" in task.lower():
+            opening = "I need to increase my protein to 120g daily"
+        else:
+            opening = f"I need you to {task}"
     else:
-        opening = random.choice(openings)
+        # Fallback to demanding versions without questions
+        opening_messages = {
+            ConversationGoal.CREATE_DAILY_PLAN: [
+                "I need a meal plan for today",
+                "Plan my meals for today", 
+                "Create my daily meal plan"
+            ],
+            ConversationGoal.CREATE_WEEKLY_PLAN: [
+                "I need a weekly meal plan",
+                "Plan my meals for the week",
+                "Create a 7-day meal plan"
+            ],
+            ConversationGoal.FIND_SPECIFIC_MEAL: [
+                "I need meal ideas",
+                "Give me dinner suggestions",
+                "I need lunch ideas"
+            ],
+            ConversationGoal.MEET_NUTRITION_GOALS: [
+                "I need to hit my nutrition goals",
+                "Set up my macros",
+                "I need my protein targets met"
+            ],
+            ConversationGoal.ACCOMMODATE_RESTRICTIONS: [
+                f"I'm {persona.dietary_restrictions[0]} and need meal ideas" if persona.dietary_restrictions else "I have dietary restrictions and need meal ideas",
+                f"I have dietary restrictions - {', '.join(persona.dietary_restrictions)}" if persona.dietary_restrictions else "I have some dietary restrictions",
+                "Find meals that fit my dietary needs"
+            ],
+            ConversationGoal.QUICK_MEAL_IDEAS: [
+                "I need something quick to make",
+                "Give me meals under 20 minutes",
+                "I'm short on time. Give me quick meal ideas"
+            ],
+            ConversationGoal.SHOPPING_LIST: [
+                "I need a shopping list for my meal plan",
+                "Create a grocery list for me",
+                "Give me what to buy for these meals"
+            ],
+            ConversationGoal.OPTIMIZE_EXISTING_PLAN: [
+                "I have meals planned but want to improve them",
+                "Optimize my current meal plan",
+                "I'm eating these foods but need better nutrition"
+            ]
+        }
+        
+        # Select opening based on communication style
+        openings = opening_messages.get(scenario.goal, ["I need help with meal planning"])
+        
+        if persona.communication_style == "chatty":
+            opening = random.choice(openings) + f" I'm {persona.name} by the way"
+        elif persona.communication_style == "uncertain":
+            opening = "Um, " + random.choice(openings).lower() 
+        else:
+            opening = random.choice(openings)
     
     return UserAgentState(
         scenario=scenario,
