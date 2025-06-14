@@ -9,7 +9,7 @@ Loads food data from CSV file for easy maintenance.
 import csv
 import os
 from typing import Dict
-from .nutrition_optimizer import FoodItem
+from ..old.nutrition_optimizer import FoodItem
 
 
 def get_food_database() -> Dict[str, FoodItem]:

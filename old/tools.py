@@ -1,140 +1,29 @@
 import json
 from typing import Annotated, Optional, List, Dict, Any, Literal
+from pydantic import BaseModel, Field
 
 from langchain_core.tools import tool
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
-from langgraph.types import Command
+from langgraph.types import Command, ToolMessage
 
 from src.models import (
     MealPlannerState, MealItem, NutritionInfo, NutritionGoals,
-    MealSuggestion
+    MealSuggestion, MealPreferences, MealPlanResponse, MealSuggestionOptions
 )
+from src.tool_utils import (
+    add_dietary_restrictions_context,
+    update_planning_phase,
+    update_meal_with_items
+)
+from src.constants import MEAL_TYPES, MealType
 
 # Initialize LLM for generation tools
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
-# === CONSTANTS ===
-MEAL_TYPES = ["breakfast", "lunch", "dinner", "snacks"]
-MealType = Literal["breakfast", "lunch", "dinner", "snacks"]
-
-
-# === HELPER FUNCTIONS ===
-def update_planning_phase(state: MealPlannerState, context) -> Any:
-    """Update planning phase based on current state."""
-    new_context = context.model_copy()
-    
-    if new_context.planning_phase == "gathering_info" and state.nutrition_goals:
-        new_context.planning_phase = "building_meals"
-    elif new_context.planning_phase == "setting_goals":
-        new_context.planning_phase = "building_meals"
-    elif new_context.planning_phase == "building_meals" and state.has_sufficient_nutrition:
-        new_context.planning_phase = "optimizing"
-    elif new_context.planning_phase == "optimizing" and state.has_sufficient_nutrition:
-        new_context.planning_phase = "complete"
-    
-    # Special case for when meals already exist
-    meals_with_items = sum(1 for meal in MEAL_TYPES if getattr(state, meal))
-    if meals_with_items > 0 and new_context.planning_phase == "setting_goals":
-        new_context.planning_phase = "building_meals"
-        if meals_with_items >= 2:
-            new_context.planning_phase = "optimizing"
-    
-    return new_context
-
-
-def add_dietary_restrictions_context(context: str, restrictions: List[str], severity: str = "MUST NOT") -> str:
-    """Add dietary restrictions warning to context."""
-    if restrictions:
-        context += f"Dietary restrictions: {', '.join(restrictions)}\n"
-        context += f"⚠️ CRITICAL: You {severity} include ANY foods that violate these restrictions!\n"
-        context += "This is extremely important - double-check every single item.\n\n"
-    return context
-
-
-def parse_json_from_llm_response(response_content: str) -> Optional[dict]:
-    """Extract and parse JSON from LLM response."""
-    try:
-        import re
-        json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-    except (json.JSONDecodeError, AttributeError):
-        pass
-    return None
-
-
-def create_meal_items(items_data: List[Dict[str, Any]]) -> List[MealItem]:
-    """Convert JSON item data to MealItem objects."""
-    items = []
-    for item_data in items_data:
-        items.append(MealItem(
-            food=item_data["food"],
-            amount=item_data["amount"],
-            unit=item_data.get("unit", "serving")
-        ))
-    return items
-
-# === NUTRITION HELPERS ===
 
 # === MEAL MANAGEMENT TOOLS ===
-
-@tool
-def add_meal_item(
-    meal_type: MealType,
-    food: str,
-    amount: str,
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-    unit: str = "serving"
-) -> Command:
-    """Add a food item to a specific meal."""
-    new_item = MealItem(food=food, amount=amount, unit=unit)
-    updated_meal = state[meal_type] + [new_item]
-
-    # Update phase if needed - use a temporary state to check phase transitions
-    temp_state = state.model_copy()
-    setattr(temp_state, meal_type, updated_meal)
-    
-    new_context = update_planning_phase(temp_state, state["conversation_context"])
-
-    return Command(
-        update={
-            meal_type: updated_meal,
-            "current_meal": meal_type,
-            "conversation_context": new_context
-        }
-    )
-
-
-@tool
-def add_multiple_items(
-    meal_type: MealType,
-    items: List[Dict[str, str]],
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> Command:
-    """Add multiple items to a meal in one operation. Each item should have 'food', 'amount', and optionally 'unit'."""
-    # Use helper to create items
-    new_items = create_meal_items(items)
-
-    # Add all items to the meal
-    updated_meal = state[meal_type] + new_items
-
-    # Update planning phase if appropriate - use temporary state to check transitions
-    temp_state = state.model_copy()
-    setattr(temp_state, meal_type, updated_meal)
-    
-    new_context = update_planning_phase(temp_state, state["conversation_context"])
-
-    return Command(
-        update={
-            meal_type: updated_meal,
-            "current_meal": meal_type,
-            "conversation_context": new_context
-        }
-    )
 
 
 @tool
@@ -144,7 +33,21 @@ def add_meal_from_suggestion(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Add a complete suggested meal using its key (e.g., 'option_1')."""
+    """Add a complete suggested meal from previously generated suggestions.
+    
+    Use this tool after calling suggest_meal to add one of the suggested options
+    to the meal plan. The suggestion must exist from a recent suggest_meal call.
+    
+    Parameters:
+    - meal_type: Must be one of 'breakfast', 'lunch', 'dinner', or 'snacks'
+    - suggestion_key: Key for the suggestion, always one of 'option_1', 'option_2', or 'option_3'
+    
+    Example workflow:
+    1. suggest_meal(meal_type="breakfast")  # Generates 3 options
+    2. add_meal_from_suggestion(meal_type="breakfast", suggestion_key="option_2")  # Adds option 2
+    
+    This adds all items from the chosen suggestion to the specified meal.
+    """
     context = state["conversation_context"]
 
     # Get the suggestion from conversation context
@@ -174,97 +77,14 @@ def add_meal_from_suggestion(
     )
 
 
-@tool
-def remove_meal_item(
-    meal_type: MealType,
-    food: str,
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> Command:
-    """Remove a food item from a specific meal."""
-    meal_list = state[meal_type]
-
-    # Find and remove the item (immutable update)
-    updated_meal = []
-    found = False
-    for item in meal_list:
-        if item.food.lower() == food.lower() and not found:
-            found = True  # Skip this item (remove it)
-        else:
-            updated_meal.append(item)
-
-    if not found:
-        # Return command with no updates but a message
-        return Command(update={})
-
-    return Command(
-        update={
-            meal_type: updated_meal,
-            "current_meal": meal_type
-        }
-    )
 
 
-@tool
-def view_current_meals(
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
-    """View all meals currently in the meal plan."""
-    result = "Current Meal Plan:\n\n"
-
-    for meal_type in MEAL_TYPES:
-        items = state[meal_type]
-        if items:
-            result += f"**{meal_type.capitalize()}:**\n"
-            for item in items:
-                result += f"  - {item.amount} {item.unit} of {item.food}\n"
-            result += "\n"
-        else:
-            result += f"**{meal_type.capitalize()}:** Empty\n\n"
-
-    # Add current nutrition totals
-    result += f"\n**Current Daily Totals:**\n- {state.nutrition_summary}\n"
-
-    # Compare to goals if set
-    if state.nutrition_goals:
-        goals = state.nutrition_goals
-        totals = state.current_totals
-        result += "\n**Progress to Goals:**\n"
-        calories_percent = (totals.calories/goals.daily_calories*100)
-        protein_percent = (totals.protein/goals.protein_target*100)
-        result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
-        result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
-
-    return result.strip()
 
 
-@tool
-def clear_meal(
-    meal_type: MealType,
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> Command:
-    """Clear all items from a specific meal."""
-    return Command(
-        update={
-            meal_type: [],
-            "current_meal": meal_type
-        }
-    )
 
 
-@tool
-def clear_all_meals(
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> Command:
-    """Clear the entire meal plan."""
-    updates = {"current_meal": "breakfast"}
-    for meal_type in MEAL_TYPES:
-        updates[meal_type] = []
-    
-    return Command(update=updates)
+
+
 
 
 # === USER PROFILE TOOLS ===
@@ -278,7 +98,23 @@ def update_user_profile(
     cooking_time_preference: Optional[str] = None,
     health_goals: Optional[List[str]] = None
 ) -> Command:
-    """Update user profile information. Only provided fields will be updated."""
+    """Update user's dietary preferences and restrictions.
+    
+    Updates only the provided fields, leaving others unchanged.
+    This information affects all meal suggestions and planning.
+    
+    Parameters:
+    - dietary_restrictions: List of restrictions like ['vegetarian', 'gluten-free', 'dairy-free']
+    - preferred_cuisines: List of cuisine preferences like ['italian', 'mediterranean', 'asian']
+    - cooking_time_preference: 'quick', 'moderate', or 'extensive'
+    - health_goals: List of goals like ['weight loss', 'muscle gain', 'heart health']
+    
+    Examples:
+    - update_user_profile(dietary_restrictions=['vegetarian', 'gluten-free'])
+    - update_user_profile(preferred_cuisines=['mediterranean'], cooking_time_preference='quick')
+    
+    Use this early in conversations to establish preferences that guide all meal planning.
+    """
     profile = state["user_profile"]
     new_profile = profile.model_copy()
 
@@ -322,7 +158,25 @@ def set_nutrition_goals(
     tool_call_id: Annotated[str, InjectedToolCallId],
     diet_type: Literal["balanced", "high-protein", "low-carb", "keto", "vegetarian", "vegan"] = "balanced"
 ) -> Command:
-    """Set personalized daily nutrition goals."""
+    """Set personalized daily nutrition goals with macro targets.
+    
+    This tool establishes daily calorie and macronutrient targets based on the specified diet type.
+    It automatically calculates protein, carbohydrate, and fat targets based on the diet approach.
+    
+    Parameters:
+    - daily_calories: Target daily calories (e.g., 2000, 1800, 2500)
+    - diet_type: Diet approach that determines macro ratios:
+      * "balanced" - 20% protein, 50% carbs, 30% fat (standard balanced diet)
+      * "high-protein" - 30% protein, 40% carbs, 30% fat (muscle building/weight loss)
+      * "low-carb" - 25% protein, 20% carbs, 55% fat (reduced carbohydrate)
+      * "keto" - 20% protein, 5% carbs, 75% fat (ketogenic diet)
+      * "vegetarian" - 20% protein, 50% carbs, 30% fat (plant-based with dairy/eggs)
+      * "vegan" - 20% protein, 50% carbs, 30% fat (fully plant-based)
+    
+    Example:
+    - set_nutrition_goals(daily_calories=2000, diet_type="high-protein")
+    - set_nutrition_goals(daily_calories=1800, diet_type="balanced")
+    """
     # Calculate macro targets based on diet type
     if diet_type == "high-protein":
         protein_percent = 0.30
@@ -377,7 +231,25 @@ def analyze_meal_nutrition(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
-    """Analyze nutritional content of a specific meal. Uses estimates for common foods."""
+    """Get detailed nutritional breakdown for a specific meal.
+    
+    Provides estimated nutritional content (calories, protein, carbs, fat) for
+    all items in the specified meal using common food nutrition data.
+    
+    Parameters:
+    - meal_type: Must be one of 'breakfast', 'lunch', 'dinner', or 'snacks'
+    
+    Examples:
+    - analyze_meal_nutrition(meal_type="breakfast")
+    - analyze_meal_nutrition(meal_type="lunch")
+    
+    Use this tool to:
+    - Check if a meal meets nutritional requirements
+    - Understand calorie/macro distribution within a meal
+    - Identify meals that need nutritional adjustment
+    
+    Returns 'Empty' if the meal has no items.
+    """
     items = state[meal_type]
     if not items:
         return f"{meal_type.capitalize()} is empty."
@@ -437,7 +309,22 @@ def suggest_foods_to_meet_goals(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
-    """Suggest foods that would help meet remaining nutrition goals."""
+    """Suggest specific foods with portions to fill remaining nutrition gaps.
+    
+    Analyzes current nutrition totals vs. goals and recommends 5-7 specific foods
+    that would help reach daily targets. Respects all dietary restrictions.
+    
+    This tool is most useful when:
+    - Daily nutrition is partially complete but gaps remain
+    - User wants targeted food recommendations rather than full meals
+    - Fine-tuning nutrition to meet specific macro targets
+    
+    Requires nutrition goals to be set first. Returns suggestions prioritized
+    by the largest remaining nutrition gaps (e.g., high-protein foods if protein is low).
+    
+    Use this instead of suggest_meal when you want individual food suggestions
+    rather than complete meal options.
+    """
     if not state.nutrition_goals:
         return "Please set nutrition goals first to get targeted suggestions."
 
@@ -463,7 +350,26 @@ def generate_remaining_meals(
     tool_call_id: Annotated[str, InjectedToolCallId],
     meal_types: Optional[List[MealType]] = None
 ) -> Command:
-    """Generate meals only for empty meal slots, preserving existing meals."""
+    """Fill empty meal slots while preserving existing planned meals.
+    
+    Automatically detects which meals are empty and generates complete meals for them.
+    This is the preferred way to complete a partial meal plan without overwriting progress.
+    
+    Parameters:
+    - meal_types: Optional list to specify which meals to generate. If None, auto-detects empty meals.
+                 Valid values: ['breakfast', 'lunch', 'dinner', 'snacks']
+    
+    Examples:
+    - generate_remaining_meals()  # Fill all empty meals automatically
+    - generate_remaining_meals(meal_types=['lunch', 'dinner'])  # Only generate lunch and dinner
+    
+    Use this tool when:
+    - User has some meals planned but others are empty
+    - You want to complete a meal plan without losing existing progress
+    - Preserving user's manual meal choices is important
+    
+    Takes into account nutrition goals, dietary restrictions, and remaining daily needs.
+    """
     user_profile = state.user_profile
     nutrition_goals = state.nutrition_goals
 
@@ -490,68 +396,63 @@ def generate_remaining_meals(
 
     prompt = f"""{context}
 
-Generate meals with specific portions. Format as JSON:
-{{"""
+Generate meals with specific portions for the requested meal types: {', '.join(meal_types)}.
+Provide realistic portion sizes for each food item."""
 
-    for meal in meal_types:
-        prompt += f"""
-    "{meal}": [
-        {{"food": "item1", "amount": "1", "unit": "cup"}},
-        {{"food": "item2", "amount": "2", "unit": "oz"}}
-    ],"""
-
-    prompt = prompt.rstrip(",") + "\n}"
-
-    response = llm.invoke(prompt)
+    # Create structured LLM for meal generation
+    structured_llm = llm.with_structured_output(MealPlanResponse)
+    meal_plan = structured_llm.invoke(prompt)
 
     # Update conversation phase
     conv_context = state["conversation_context"]
     new_context = conv_context.model_copy()
     new_context.planning_phase = "optimizing"
 
-    meal_data = parse_json_from_llm_response(response.content)
-    if meal_data:
-        # Start with current state
-        temp_state = dict(state)
+    # Build updates - only for meals we generated
+    updates = {
+        "conversation_context": new_context
+    }
+    
+    # Only update the requested meals
+    for meal_type in meal_types:
+        if hasattr(meal_plan, meal_type):
+            meal_items = getattr(meal_plan, meal_type)
+            if meal_items:
+                updates[meal_type] = meal_items
 
-                # Only update the requested meals
-        for meal_type in meal_types:
-            if meal_type in meal_data:
-                items = create_meal_items(meal_data[meal_type])
-                temp_state[meal_type] = items
+    # Check if we should be in complete phase
+    if state.has_sufficient_nutrition:
+        new_context.planning_phase = "complete"
 
-        # Create a full temp state for checking phase transitions
-        full_temp_state = state.model_copy()
-        for meal_type in meal_types:
-            if meal_type in temp_state:
-                setattr(full_temp_state, meal_type, temp_state[meal_type])
-
-        # Check if we should be in complete phase
-        if state.has_sufficient_nutrition:
-            new_context.planning_phase = "complete"
-
-        # Build updates - only for meals we generated
-        updates = {
-            "conversation_context": new_context
-        }
-        for meal_type in meal_types:
-            if meal_type in temp_state:
-                updates[meal_type] = temp_state[meal_type]
-
-        return Command(update=updates)
-
-    # Fallback
-    return Command(update={"conversation_context": new_context})
+    return Command(update=updates)
 
 
 @tool
 def generate_meal_plan(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    preferences: Optional[Dict[str, Any]] = None,
+    preferences: Optional[MealPreferences] = None,
     preserve_existing: bool = True
 ) -> Command:
-    """Generate a complete daily meal plan. By default, preserves existing meals unless preserve_existing=False."""
+    """Generate a complete daily meal plan with structured preferences.
+    
+    Creates a comprehensive meal plan for all meals (breakfast, lunch, dinner, snacks).
+    By default, preserves existing meals and only fills empty slots.
+    
+    Parameters:
+    - preferences: Optional MealPreferences object with structured preferences:
+      * cuisine: Preferred cuisine type (e.g., 'italian', 'mediterranean', 'asian')
+      * cooking_time: 'quick', 'moderate', or 'extensive'
+      * meal_style: Style like 'light', 'hearty', 'comfort food', 'fresh'
+      * ingredients_to_include: List of specific ingredients to include
+      * ingredients_to_avoid: List of ingredients to avoid
+    - preserve_existing: If True (default), keeps existing meals and only fills empty slots.
+                        If False, replaces entire meal plan.
+    
+    Example usage:
+    - generate_meal_plan()  # Fill empty meals with defaults
+    - generate_meal_plan(preferences=MealPreferences(cuisine="mediterranean"), preserve_existing=False)
+    """
 
     # If preserve_existing and we have some meals, use generate_remaining_meals
     if preserve_existing:
@@ -583,71 +484,50 @@ def generate_meal_plan(
             context += f"Cooking time preference: {user_profile.cooking_time_preference}\n"
 
     if preferences:
-        context += f"Additional preferences: {json.dumps(preferences)}\n"
+        context += "Additional preferences:\n"
+        if preferences.cuisine:
+            context += f"- Cuisine: {preferences.cuisine}\n"
+        if preferences.cooking_time:
+            context += f"- Cooking time: {preferences.cooking_time}\n"
+        if preferences.meal_style:
+            context += f"- Meal style: {preferences.meal_style}\n"
+        if preferences.ingredients_to_include:
+            context += f"- Must include: {', '.join(preferences.ingredients_to_include)}\n"
+        if preferences.ingredients_to_avoid:
+            context += f"- Avoid: {', '.join(preferences.ingredients_to_avoid)}\n"
+        context += "\n"
 
     prompt = f"""{context}
 
-Create a meal plan with:
+Create a complete meal plan with:
 - Breakfast (2-4 items)
-- Lunch (3-5 items)
+- Lunch (3-5 items)  
 - Dinner (3-5 items)
 - Snacks (1-3 items, optional)
 
-For each meal, format as a JSON list of items:
-{{
-    "breakfast": [
-        {{"food": "oatmeal", "amount": "1", "unit": "cup"}},
-        {{"food": "blueberries", "amount": "1/2", "unit": "cup"}}
-    ],
-    "lunch": [...],
-    "dinner": [...],
-    "snacks": [...]
-}}
-"""
+Provide realistic portion sizes for each food item."""
 
-    response = llm.invoke(prompt)
+    # Create structured LLM for meal generation
+    structured_llm = llm.with_structured_output(MealPlanResponse)
+    meal_plan = structured_llm.invoke(prompt)
 
     # Update conversation phase - generating a full plan means we're optimizing
     conv_context = state["conversation_context"]
     new_context = conv_context.model_copy()
     new_context.planning_phase = "optimizing"
 
-    meal_data = parse_json_from_llm_response(response.content)
-    if meal_data:
-        # Convert to MealItem objects and validate against restrictions
-        temp_state = {"user_profile": user_profile}
-        all_items = []
+    # Check if we should be in complete phase
+    if state.has_sufficient_nutrition:
+        new_context.planning_phase = "complete"
 
-        for meal_type in MEAL_TYPES:
-            if meal_type in meal_data:
-                items = create_meal_items(meal_data[meal_type])
-                temp_state[meal_type] = items
-                for item in items:
-                    all_items.append(f"{item.amount} {item.unit} of {item.food}")
-            else:
-                temp_state[meal_type] = []
-
-            # Create full temp state for checking phase transitions
-            full_temp_state = state.model_copy()
-            for meal_type in MEAL_TYPES:
-                setattr(full_temp_state, meal_type, temp_state[meal_type])
-
-            # Check if we should be in complete phase
-            if state.has_sufficient_nutrition:
-                new_context.planning_phase = "complete"
-
-            updates = {
-                "conversation_context": new_context
-            }
-            for meal_type in MEAL_TYPES:
-                updates[meal_type] = temp_state[meal_type]
-
-            return Command(update=updates)
-
-    # Fallback: clear meals and return empty state
-    updates = {"conversation_context": new_context}
-    for meal_type in MEAL_TYPES:
-        updates[meal_type] = []
+    # Build updates for all meal types
+    updates = {
+        "conversation_context": new_context,
+        "breakfast": meal_plan.breakfast,
+        "lunch": meal_plan.lunch,
+        "dinner": meal_plan.dinner,
+        "snacks": meal_plan.snacks
+    }
     
     return Command(update=updates)
 
@@ -657,9 +537,31 @@ def suggest_meal(
     meal_type: MealType,
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    preferences: Optional[Dict[str, Any]] = None
+    preferences: Optional[MealPreferences] = None
 ) -> Command:
-    """Suggest options for a specific meal based on preferences and remaining nutrition needs."""
+    """Generate 3 meal suggestions for a specific meal type.
+    
+    This tool provides 3 different options for a meal, taking into account:
+    - Current nutrition needs and remaining daily targets
+    - User's dietary restrictions and preferences  
+    - High protein prioritization if protein goals are not being met
+    
+    Parameters:
+    - meal_type: Must be one of 'breakfast', 'lunch', 'dinner', or 'snacks'
+    - preferences: Optional MealPreferences object with structured preferences:
+      * cuisine: Preferred cuisine type (e.g., 'italian', 'mediterranean', 'asian')
+      * cooking_time: 'quick', 'moderate', or 'extensive'  
+      * meal_style: Style like 'light', 'hearty', 'comfort food', 'fresh'
+      * ingredients_to_include: List of specific ingredients to include
+      * ingredients_to_avoid: List of ingredients to avoid
+    
+    The suggestions will be saved and can be added using add_meal_from_suggestion tool
+    with keys like 'option_1', 'option_2', 'option_3'.
+    
+    Example usage:
+    - suggest_meal(meal_type="breakfast") 
+    - suggest_meal(meal_type="lunch", preferences=MealPreferences(cuisine="mediterranean", cooking_time="quick"))
+    """
     user_profile = state.user_profile
     
     context = f"Suggest 3 different {meal_type} options.\n\n"
@@ -680,65 +582,37 @@ def suggest_meal(
     context = add_dietary_restrictions_context(context, user_profile.dietary_restrictions, "Only suggest foods that STRICTLY comply with")
 
     if preferences:
-        context += f"Additional preferences: {json.dumps(preferences)}\n"
+        context += "Additional preferences:\n"
+        if preferences.cuisine:
+            context += f"- Cuisine: {preferences.cuisine}\n"
+        if preferences.cooking_time:
+            context += f"- Cooking time: {preferences.cooking_time}\n"
+        if preferences.meal_style:
+            context += f"- Meal style: {preferences.meal_style}\n"
+        if preferences.ingredients_to_include:
+            context += f"- Must include: {', '.join(preferences.ingredients_to_include)}\n"
+        if preferences.ingredients_to_avoid:
+            context += f"- Avoid: {', '.join(preferences.ingredients_to_avoid)}\n"
+        context += "\n"
 
     prompt = f"""{context}
 
-Provide 3 {meal_type} suggestions in JSON format with specific portions:
-{{
-    "option_1": {{
-        "name": "Meal Name",
-        "description": "Brief description",
-        "items": [
-            {{"food": "item1", "amount": "1", "unit": "cup"}},
-            {{"food": "item2", "amount": "2", "unit": "oz"}}
-        ],
-        "nutrition": {{
-            "calories": 450,
-            "protein": 25,
-            "carbohydrates": 50,
-            "fat": 15
-        }}
-    }},
-    "option_2": {{...}},
-    "option_3": {{...}}
-}}"""
+Provide 3 different {meal_type} suggestions with specific portions and nutritional information."""
 
-    response = llm.invoke(prompt)
+    # Create structured LLM for meal suggestions
+    structured_llm = llm.with_structured_output(MealSuggestionOptions)
+    suggestions = structured_llm.invoke(prompt)
 
     # Parse response and save suggestions in conversation context
     conv_context = state["conversation_context"]
     new_context = conv_context.model_copy()
 
-    suggestions_data = parse_json_from_llm_response(response.content)
-    if suggestions_data:
-        # Convert to MealSuggestion objects and save in context
-        new_context.last_suggestions[meal_type] = {}
-
-        for key, data in suggestions_data.items():
-            if key.startswith("option_"):
-                # Convert each item in suggestion using helper
-                items = create_meal_items(data.get("items", []))
-
-                if items:  # Save suggestion if it has items
-                    nutrition = NutritionInfo(
-                        calories=data["nutrition"]["calories"],
-                        protein=data["nutrition"]["protein"],
-                        carbohydrates=data["nutrition"]["carbohydrates"],
-                        fat=data["nutrition"]["fat"]
-                    )
-
-                    suggestion = MealSuggestion(
-                        name=data["name"],
-                        items=items,
-                        nutrition=nutrition,
-                        description=data.get("description", "")
-                    )
-
-                    new_context.last_suggestions[meal_type][key] = suggestion
-    else:
-        # If parsing fails, still update context to clear old suggestions
-        new_context.last_suggestions[meal_type] = {}
+    # Save the structured suggestions directly
+    new_context.last_suggestions[meal_type] = {
+        "option_1": suggestions.option_1,
+        "option_2": suggestions.option_2,
+        "option_3": suggestions.option_3
+    }
 
     # Return the conversation context update and the formatted response
     return Command(
@@ -755,7 +629,28 @@ def generate_shopping_list(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
-    """Generate a shopping list from the current meal plan."""
+    """Create a consolidated shopping list from all meals in the current meal plan.
+    
+    Combines all food items across breakfast, lunch, dinner, and snacks into
+    an organized shopping list. Consolidates duplicate items and shows total quantities.
+    
+    This tool is most useful:
+    - After completing a meal plan
+    - When user is ready to shop for ingredients
+    - To see total quantities needed for meal prep
+    
+    Returns formatted shopping list with:
+    - All unique food items
+    - Combined quantities for items used in multiple meals
+    - Clear indication when items appear in multiple meals
+    
+    Example output format:
+    - chicken breast: 12 oz (total from multiple meals)
+    - brown rice: 2 cups
+    - broccoli: 3 cups
+    
+    Returns message if meal plan is empty.
+    """
     all_items = {}
 
     # Collect all items from all meals
@@ -786,7 +681,31 @@ def get_meal_ideas(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
-    """Get meal ideas based on specific criteria like ingredients, cuisine, or cooking time."""
+    """Generate meal ideas based on specific criteria or constraints.
+    
+    Provides 5 meal ideas that match the given criteria while respecting
+    all dietary restrictions. This is for inspiration and brainstorming.
+    
+    Parameters:
+    - criteria: Specific requirements or preferences as a string
+    
+    Example criteria:
+    - "using chicken and vegetables"
+    - "quick 15-minute meals"
+    - "high protein breakfast options"  
+    - "Mediterranean cuisine"
+    - "meals with leftover rice"
+    - "low-carb dinner ideas"
+    - "vegetarian lunch options"
+    
+    Use this tool when:
+    - User needs inspiration for meal types
+    - Looking for meals with specific ingredients
+    - Exploring cuisine types or cooking methods
+    - User asks "what can I make with..."
+    
+    Unlike suggest_meal, this provides general ideas rather than complete meal plans.
+    """
     user_profile = state.user_profile
 
     context = f"Provide meal ideas based on: {criteria}\n\n"
@@ -799,3 +718,5 @@ Include a brief description of each meal and why it fits the criteria."""
 
     response = llm.invoke(prompt)
     return f"Meal ideas for '{criteria}':\n\n{response.content}"
+
+

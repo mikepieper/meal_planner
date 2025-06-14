@@ -3,11 +3,24 @@ from langgraph.graph import END
 from src.models import MealPlannerState
 
 from langchain_openai import ChatOpenAI
+
 llm = ChatOpenAI(model="gpt-4o", temperature=0) 
 
 
 def should_summarize(state: MealPlannerState) -> str:
-    """Determine whether to summarize the conversation or run tools."""
+    """Determine whether to summarize the conversation or run tools.
+    
+    Args:
+        state: The current state of the conversation
+        
+    Returns:
+        The next node to execute: "tools" if tools are needed, "summarize" if a summary is needed, or END if the conversation is complete
+
+    Example:
+        If the last message is a tool call, return "tools"
+        If the number of non-system messages is greater than 10, return "summarize"
+        Otherwise, return END
+    """
     messages = state.messages
     
     # First check if we need to call tools (this takes priority)
@@ -36,7 +49,7 @@ def summarize_conversation(state: MealPlannerState) -> dict:
             f"Previous conversation summary: {summary}\n\n"
             "Please extend this summary by incorporating the new messages above. "
             "Focus ONLY on information not captured in the meal plan state:\n"
-            "- WHY the user made certain choices (reasoning/context)\n"
+            "- Why the user made certain choices (reasoning/context)\n"
             "- Options they explicitly rejected and why\n"
             "- Specific brand preferences or cooking methods mentioned\n"
             "- Timing constraints (e.g., 'need lunch to be portable')\n"
@@ -47,7 +60,7 @@ def summarize_conversation(state: MealPlannerState) -> dict:
         summary_prompt = (
             "Create a concise summary focusing on context and reasoning. "
             "Capture ONLY:\n"
-            "- WHY the user wants certain things (not just what)\n" 
+            "- Why the user wants certain things (not just what)\n" 
             "- Rejected options and reasoning\n"
             "- Specific preferences about brands, cooking methods, timing\n"
             "- User's reactions to suggestions\n"
