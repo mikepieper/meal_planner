@@ -66,15 +66,7 @@ def should_progress_to_optimizing(state: MealPlannerState) -> bool:
 
 def should_progress_to_complete(state: MealPlannerState) -> bool:
     """Check if we should move to complete phase."""
-    if not state.current_totals or not state.nutrition_goals:
-        return False
-
-    totals = state.current_totals
-    goals = state.nutrition_goals
-
-    # Complete if we're within 10% of calorie goal
-    calorie_percent = totals.calories / goals.daily_calories
-    return 0.9 <= calorie_percent <= 1.1
+    return state.has_sufficient_nutrition
 
 
 # === MEAL MANAGEMENT TOOLS ===
@@ -110,9 +102,9 @@ def add_meal_item(
         new_context.planning_phase = "building_meals"
     elif new_context.planning_phase == "setting_goals":
         new_context.planning_phase = "building_meals"
-    elif new_context.planning_phase == "building_meals" and should_progress_to_optimizing(temp_state):
+    elif new_context.planning_phase == "building_meals" and state.has_sufficient_nutrition:
         new_context.planning_phase = "optimizing"
-    elif new_context.planning_phase == "optimizing" and should_progress_to_complete(temp_state):
+    elif new_context.planning_phase == "optimizing" and state.has_sufficient_nutrition:
         new_context.planning_phase = "complete"
 
     return Command(
@@ -164,9 +156,9 @@ def add_multiple_items(
     # Progress phase based on state
     if new_context.planning_phase in ["gathering_info", "setting_goals"] and state.get("nutrition_goals"):
         new_context.planning_phase = "building_meals"
-    elif new_context.planning_phase == "building_meals" and should_progress_to_optimizing(temp_state):
+    elif new_context.planning_phase == "building_meals" and state.has_sufficient_nutrition:
         new_context.planning_phase = "optimizing"
-    elif new_context.planning_phase == "optimizing" and should_progress_to_complete(temp_state):
+    elif new_context.planning_phase == "optimizing" and state.has_sufficient_nutrition:
         new_context.planning_phase = "complete"
 
     return Command(
@@ -219,9 +211,9 @@ def add_meal_from_suggestion(
     # Progress phase based on state
     if new_context.planning_phase in ["gathering_info", "setting_goals"] and state.get("nutrition_goals"):
         new_context.planning_phase = "building_meals"
-    elif new_context.planning_phase == "building_meals" and should_progress_to_optimizing(temp_state):
+    elif new_context.planning_phase == "building_meals" and state.has_sufficient_nutrition:
         new_context.planning_phase = "optimizing"
-    elif new_context.planning_phase == "optimizing" and should_progress_to_complete(temp_state):
+    elif new_context.planning_phase == "optimizing" and state.has_sufficient_nutrition:
         new_context.planning_phase = "complete"
 
     return Command(
@@ -282,23 +274,18 @@ def view_current_meals(
         else:
             result += f"**{meal_type.capitalize()}:** Empty\n\n"
 
-    # Add current nutrition totals if available
-    if state.current_totals:
-        totals = state.current_totals
-        result += "\n**Current Daily Totals:**\n"
-        result += f"- Calories: {totals.calories:.0f}\n"
-        result += f"- Protein: {totals.protein:.0f}g\n"
-        result += f"- Carbohydrates: {totals.carbohydrates:.0f}g\n"
-        result += f"- Fat: {totals.fat:.0f}g\n"
+    # Add current nutrition totals
+    result += f"\n**Current Daily Totals:**\n- {state.nutrition_summary}\n"
 
-        # Compare to goals if set
-        if state.get("nutrition_goals"):
-            goals = state["nutrition_goals"]
-            result += "\n**Progress to Goals:**\n"
-            calories_percent = (totals.calories/goals.daily_calories*100)
-            protein_percent = (totals.protein/goals.protein_target*100)
-            result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
-            result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
+    # Compare to goals if set
+    if state.nutrition_goals:
+        goals = state.nutrition_goals
+        totals = state.current_totals
+        result += "\n**Progress to Goals:**\n"
+        calories_percent = (totals.calories/goals.daily_calories*100)
+        protein_percent = (totals.protein/goals.protein_target*100)
+        result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
+        result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
 
     return result.strip()
 
@@ -470,39 +457,32 @@ def analyze_daily_nutrition(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
     """Analyze total daily nutritional content and compare to goals."""
-    if state.current_totals:
+    result = "**Daily Nutrition Analysis:**\n\n"
+    result += f"**Current Totals:**\n- {state.nutrition_summary}\n"
+
+    if state.nutrition_goals:
+        goals = state.nutrition_goals
         totals = state.current_totals
-        result = "**Daily Nutrition Analysis:**\n\n"
-        result += "**Current Totals:**\n"
-        result += f"- Calories: {totals.calories:.0f}\n"
-        result += f"- Protein: {totals.protein:.0f}g\n"
-        result += f"- Carbohydrates: {totals.carbohydrates:.0f}g\n"
-        result += f"- Fat: {totals.fat:.0f}g\n"
+        result += "\n**Goals:**\n"
+        result += f"- Calories: {goals.daily_calories}\n"
+        result += f"- Protein: {goals.protein_target:.0f}g\n"
+        result += f"- Carbohydrates: {goals.carb_target:.0f}g\n"
+        result += f"- Fat: {goals.fat_target:.0f}g\n"
 
-        if state.get("nutrition_goals"):
-            goals = state["nutrition_goals"]
-            result += "\n**Goals:**\n"
-            result += f"- Calories: {goals.daily_calories}\n"
-            result += f"- Protein: {goals.protein_target:.0f}g\n"
-            result += f"- Carbohydrates: {goals.carb_target:.0f}g\n"
-            result += f"- Fat: {goals.fat_target:.0f}g\n"
+        result += "\n**Progress:**\n"
+        result += f"- Calories: {(totals.calories/goals.daily_calories*100):.0f}% of goal\n"
+        result += f"- Protein: {(totals.protein/goals.protein_target*100):.0f}% of goal\n"
+        result += f"- Carbohydrates: {(totals.carbohydrates/goals.carb_target*100):.0f}% of goal\n"
+        result += f"- Fat: {(totals.fat/goals.fat_target*100):.0f}% of goal\n"
 
-            result += "\n**Progress:**\n"
-            result += f"- Calories: {(totals.calories/goals.daily_calories*100):.0f}% of goal\n"
-            result += f"- Protein: {(totals.protein/goals.protein_target*100):.0f}% of goal\n"
-            result += f"- Carbohydrates: {(totals.carbohydrates/goals.carb_target*100):.0f}% of goal\n"
-            result += f"- Fat: {(totals.fat/goals.fat_target*100):.0f}% of goal\n"
+        # Calculate remaining needs
+        result += "\n**Remaining for the day:**\n"
+        result += f"- Calories: {max(0, goals.daily_calories - totals.calories):.0f}\n"
+        result += f"- Protein: {max(0, goals.protein_target - totals.protein):.0f}g\n"
+        result += f"- Carbohydrates: {max(0, goals.carb_target - totals.carbohydrates):.0f}g\n"
+        result += f"- Fat: {max(0, goals.fat_target - totals.fat):.0f}g\n"
 
-            # Calculate remaining needs
-            result += "\n**Remaining for the day:**\n"
-            result += f"- Calories: {max(0, goals.daily_calories - totals.calories):.0f}\n"
-            result += f"- Protein: {max(0, goals.protein_target - totals.protein):.0f}g\n"
-            result += f"- Carbohydrates: {max(0, goals.carb_target - totals.carbohydrates):.0f}g\n"
-            result += f"- Fat: {max(0, goals.fat_target - totals.fat):.0f}g\n"
-
-        return result
-    else:
-        return "No meals in the current plan to analyze."
+    return result
 
 
 # === SMART SUGGESTION TOOLS ===
@@ -513,29 +493,19 @@ def suggest_foods_to_meet_goals(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
     """Suggest foods that would help meet remaining nutrition goals."""
-    if not state.get("nutrition_goals") or not state.current_totals:
+    if not state.nutrition_goals:
         return "Please set nutrition goals first to get targeted suggestions."
 
-    goals = state["nutrition_goals"]
-    totals = state.current_totals
-    restrictions = state["user_profile"].dietary_restrictions
-
-    # Calculate what's needed
-    calories_needed = max(0, goals.daily_calories - totals.calories)
-    protein_needed = max(0, goals.protein_target - totals.protein)
-    carbs_needed = max(0, goals.carb_target - totals.carbohydrates)
-    fat_needed = max(0, goals.fat_target - totals.fat)
-
-    prompt = f"""Suggest foods to help meet these remaining nutrition needs:
-- Calories: {calories_needed:.0f}
-- Protein: {protein_needed:.0f}g
-- Carbohydrates: {carbs_needed:.0f}g
-- Fat: {fat_needed:.0f}g
+    restrictions = state.user_profile.dietary_restrictions
+    
+    # Use the standardized nutrition context
+    nutrition_context = state.nutrition_context_for_prompts
+    
+    prompt = f"""{nutrition_context}
 
 Dietary restrictions: {', '.join(restrictions) if restrictions else 'None'}
-Diet type: {goals.diet_type}
 
-Provide 5-7 specific food suggestions with portions that would help fill these gaps.
+Provide 5-7 specific food suggestions with portions that would help fill the remaining nutrition gaps.
 Focus on foods that are high in the most needed nutrients."""
 
     response = llm.invoke(prompt)
@@ -551,54 +521,31 @@ def generate_remaining_meals(
     meal_types: Optional[List[Literal["breakfast", "lunch", "dinner", "snacks"]]] = None
 ) -> Command:
     """Generate meals only for empty meal slots, preserving existing meals."""
-    user_profile = state.get("user_profile", {})
-    nutrition_goals = state.get("nutrition_goals")
-    current_totals = state.current_totals
+    user_profile = state.user_profile
+    nutrition_goals = state.nutrition_goals
 
     # Determine which meals to generate
     if meal_types is None:
         # Auto-detect empty meals
         meal_types = []
         for meal in ["breakfast", "lunch", "dinner", "snacks"]:
-            if not state.get(meal):
+            if not getattr(state, meal):
                 meal_types.append(meal)
 
     if not meal_types:
         return Command(update={})  # All meals already have items
 
-    # Calculate remaining nutrition needs
-    remaining_calories = nutrition_goals.daily_calories - current_totals.calories if nutrition_goals else 2000
-    remaining_protein = nutrition_goals.protein_target - current_totals.protein if nutrition_goals else 50
-
     context = f"Generate meals ONLY for these empty slots: {', '.join(meal_types)}\n\n"
-    context += "Remaining nutrition budget:\n"
-    context += f"- Calories: {remaining_calories:.0f}\n"
-    context += f"- Protein: {remaining_protein:.0f}g\n"
+    
+    # Add nutrition context if goals are set
+    if state.nutrition_context_for_prompts:
+        context += state.nutrition_context_for_prompts + "\n\n"
 
-    if nutrition_goals:
-        context += f"Diet type: {nutrition_goals.diet_type}\n"
-
-    if user_profile:
-        if user_profile.dietary_restrictions:
-            context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
-            context += "IMPORTANT: Do not include any foods that violate these restrictions!\n"
-        if user_profile.preferred_cuisines:
-            context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
-
-    # Allocate calories proportionally to remaining meals
-    meals_to_generate = len([m for m in meal_types if m in ["breakfast", "lunch", "dinner"]])
-    snacks_to_generate = 1 if "snacks" in meal_types else 0
-
-    if meals_to_generate > 0:
-        calories_per_meal = remaining_calories * 0.9 / meals_to_generate  # 90% for main meals
-        calories_for_snacks = remaining_calories * 0.1 if snacks_to_generate else 0
-    else:
-        calories_per_meal = 0
-        calories_for_snacks = remaining_calories
-
-    context += f"\nTarget calories per meal: ~{calories_per_meal:.0f}\n"
-    if snacks_to_generate:
-        context += f"Target calories for snacks: ~{calories_for_snacks:.0f}\n"
+    if user_profile.dietary_restrictions:
+        context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
+        context += "IMPORTANT: Do not include any foods that violate these restrictions!\n"
+    if user_profile.preferred_cuisines:
+        context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
 
     prompt = f"""{context}
 
@@ -652,7 +599,7 @@ Generate meals with specific portions. Format as JSON:
                     setattr(full_temp_state, meal_type, temp_state[meal_type])
 
             # Check if we should be in complete phase
-            if should_progress_to_complete(full_temp_state):
+            if state.has_sufficient_nutrition:
                 new_context.planning_phase = "complete"
 
             # Build updates - only for meals we generated
@@ -682,14 +629,14 @@ def generate_meal_plan(
 
     # If preserve_existing and we have some meals, use generate_remaining_meals
     if preserve_existing:
-        has_meals = any(state.get(meal) for meal in ["breakfast", "lunch", "dinner", "snacks"])
+        has_meals = any(getattr(state, meal) for meal in ["breakfast", "lunch", "dinner", "snacks"])
         if has_meals:
             # Delegate to generate_remaining_meals
             return generate_remaining_meals(state, tool_call_id)
 
     # Otherwise, generate full plan (original behavior)
-    user_profile = state.get("user_profile", {})
-    nutrition_goals = state.get("nutrition_goals")
+    user_profile = state.user_profile
+    nutrition_goals = state.nutrition_goals
 
     context = "Generate a complete daily meal plan with specific portions.\n\n"
 
@@ -775,7 +722,7 @@ For each meal, format as a JSON list of items:
                 setattr(full_temp_state, meal_type, temp_state[meal_type])
 
             # Check if we should be in complete phase
-            if should_progress_to_complete(full_temp_state):
+            if state.has_sufficient_nutrition:
                 new_context.planning_phase = "complete"
 
             updates = {
@@ -809,40 +756,24 @@ def suggest_meal(
     preferences: Optional[Dict[str, Any]] = None
 ) -> Command:
     """Suggest options for a specific meal based on preferences and remaining nutrition needs."""
-    user_profile = state.get("user_profile", {})
-    nutrition_goals = state.get("nutrition_goals")
-    current_totals = state.current_totals
-
+    user_profile = state.user_profile
+    
     context = f"Suggest 3 different {meal_type} options.\n\n"
 
-    # Smart suggestions based on what's needed
-    if nutrition_goals and current_totals:
-        calories_remaining = nutrition_goals.daily_calories - current_totals.calories
-        protein_remaining = nutrition_goals.protein_target - current_totals.protein
+    # Add nutrition context if available
+    if state.nutrition_context_for_prompts:
+        context += state.nutrition_context_for_prompts + "\n\n"
+        
+        # Add meal-specific guidance based on remaining nutrition
+        if state.nutrition_goals:
+            totals = state.current_totals
+            goals = state.nutrition_goals
+            protein_remaining = max(0, goals.protein_target - totals.protein)
+            
+            if protein_remaining > 50:
+                context += "PRIORITIZE HIGH PROTEIN OPTIONS\n\n"
 
-        # Estimate portion of daily calories for this meal
-        if meal_type in ["breakfast", "lunch", "dinner"]:
-            meal_calories = calories_remaining / 3
-        else:  # snacks
-            meal_calories = calories_remaining / 10
-
-        context += f"Remaining nutrition needs:\n"
-        context += f"- Calories: {calories_remaining:.0f} (target ~{meal_calories:.0f} for this meal)\n"
-        context += f"- Protein: {protein_remaining:.0f}g\n"
-        context += f"Diet type: {nutrition_goals.diet_type}\n\n"
-
-        if protein_remaining > 50:
-            context += "PRIORITIZE HIGH PROTEIN OPTIONS\n"
-    elif nutrition_goals:
-        # No current meals, use standard portions
-        if meal_type in ["breakfast", "lunch", "dinner"]:
-            meal_calories = nutrition_goals.daily_calories / 3
-        else:
-            meal_calories = nutrition_goals.daily_calories / 10
-        context += f"Target approximately {meal_calories:.0f} calories\n"
-        context += f"Diet type: {nutrition_goals.diet_type}\n"
-
-    if user_profile and user_profile.dietary_restrictions:
+    if user_profile.dietary_restrictions:
         context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
         context += "IMPORTANT: Only suggest foods that comply with these restrictions!\n"
 
@@ -965,11 +896,11 @@ def get_meal_ideas(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> str:
     """Get meal ideas based on specific criteria like ingredients, cuisine, or cooking time."""
-    user_profile = state.get("user_profile", {})
+    user_profile = state.user_profile
 
     context = f"Provide meal ideas based on: {criteria}\n\n"
 
-    if user_profile and user_profile.dietary_restrictions:
+    if user_profile.dietary_restrictions:
         context += f"Keep in mind dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
         context += "Only suggest meals that comply with these restrictions!\n"
 

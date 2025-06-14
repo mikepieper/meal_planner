@@ -220,3 +220,50 @@ class MealPlannerState(BaseModel):
     def current_totals(self) -> NutritionInfo:
         """Automatically calculated nutrition totals (computed field)."""
         return self.calculate_nutrition_totals()
+
+    @computed_field
+    @property
+    def nutrition_summary(self) -> str:
+        """Formatted nutrition summary for display."""
+        totals = self.current_totals
+        return f"Calories: {totals.calories:.0f}, Protein: {totals.protein:.0f}g, Carbs: {totals.carbohydrates:.0f}g, Fat: {totals.fat:.0f}g"
+
+    @computed_field
+    @property
+    def nutrition_context_for_prompts(self) -> str:
+        """Standard nutrition context for LLM prompts."""
+        if not self.nutrition_goals:
+            return ""
+        
+        totals = self.current_totals
+        goals = self.nutrition_goals
+        
+        # Calculate remaining needs
+        calories_remaining = max(0, goals.daily_calories - totals.calories)
+        protein_remaining = max(0, goals.protein_target - totals.protein)
+        carbs_remaining = max(0, goals.carb_target - totals.carbohydrates)
+        fat_remaining = max(0, goals.fat_target - totals.fat)
+        
+        # Calculate progress percentages
+        calories_percent = (totals.calories / goals.daily_calories * 100)
+        protein_percent = (totals.protein / goals.protein_target * 100)
+        
+        context = f"""Current nutrition status:
+- Consumed: {self.nutrition_summary}
+- Remaining: Calories: {calories_remaining:.0f}, Protein: {protein_remaining:.0f}g, Carbs: {carbs_remaining:.0f}g, Fat: {fat_remaining:.0f}g
+- Progress: {calories_percent:.0f}% of daily calories, {protein_percent:.0f}% of protein goal
+- Diet type: {goals.diet_type}"""
+        
+        return context
+
+    @computed_field
+    @property
+    def has_sufficient_nutrition(self) -> bool:
+        """Check if current nutrition meets minimum goals (within 10% of calorie target)."""
+        if not self.nutrition_goals:
+            return False
+        
+        totals = self.current_totals
+        goals = self.nutrition_goals
+        calorie_percent = totals.calories / goals.daily_calories
+        return 0.9 <= calorie_percent <= 1.1
