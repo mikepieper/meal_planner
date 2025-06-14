@@ -18,43 +18,6 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 # === NUTRITION HELPERS ===
 
 
-def is_food_allowed(food: str, dietary_restrictions: List[str]) -> bool:
-    """Check if a food item is allowed based on dietary restrictions."""
-    if not dietary_restrictions:
-        return True
-
-    # Use LLM for intelligent restriction checking
-    prompt = f"""Given these dietary restrictions: {', '.join(dietary_restrictions)}
-Is this food allowed: {food}?
-
-Consider:
-- Vegetarian/vegan restrictions
-- Allergies (gluten, nuts, dairy, etc.)
-- Religious dietary laws
-- Health conditions
-
-Respond with only "YES" or "NO"."""
-
-    response = llm.invoke(prompt)
-    return response.content.strip().upper() == "YES"
-
-
-def get_restriction_violation(food: str, dietary_restrictions: List[str]) -> Optional[str]:
-    """Get specific restriction violated by a food item."""
-    if not dietary_restrictions:
-        return None
-
-    prompt = f"""Given these dietary restrictions: {', '.join(dietary_restrictions)}
-Which restriction (if any) does this food violate: {food}?
-
-If no violation, respond with "NONE".
-If violation, respond with just the restriction name (e.g., "vegetarian", "gluten-free")."""
-
-    response = llm.invoke(prompt)
-    violation = response.content.strip()
-    return None if violation.upper() == "NONE" else violation
-
-
 def should_progress_to_optimizing(state: MealPlannerState) -> bool:
     """Check if we should move to optimizing phase."""
     # Count meals with items
@@ -81,12 +44,6 @@ def add_meal_item(
     unit: str = "serving"
 ) -> Command:
     """Add a food item to a specific meal."""
-    # Check dietary restrictions
-    restrictions = state["user_profile"].dietary_restrictions
-    if not is_food_allowed(food, restrictions):
-        # Agent will handle the restriction violation message
-        return Command(update={})
-
     new_item = MealItem(food=food, amount=amount, unit=unit)
     updated_meal = state[meal_type] + [new_item]
 
@@ -124,26 +81,17 @@ def add_multiple_items(
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
     """Add multiple items to a meal in one operation. Each item should have 'food', 'amount', and optionally 'unit'."""
-    restrictions = state["user_profile"].dietary_restrictions
     new_items = []
 
-    # Validate all items first
+    # Create MealItem objects for all items
     for item_data in items:
-        food = item_data["food"]
-        if not is_food_allowed(food, restrictions):
-            # Skip restricted items
-            continue
-
         new_items.append(MealItem(
-            food=food,
+            food=item_data["food"],
             amount=item_data["amount"],
             unit=item_data.get("unit", "serving")
         ))
 
-    if not new_items:
-        return Command(update={})  # All items were restricted
-
-    # Add all allowed items to the meal
+    # Add all items to the meal
     updated_meal = state[meal_type] + new_items
 
     # Update planning phase if appropriate - use temporary state to check transitions
@@ -189,18 +137,8 @@ def add_meal_from_suggestion(
 
     suggestion = context.last_suggestions[meal_type][suggestion_key]
 
-    # Validate all items (suggestions should already be validated, but double-check)
-    restrictions = state["user_profile"].dietary_restrictions
-    allowed_items = []
-    for item in suggestion.items:
-        if is_food_allowed(item.food, restrictions):
-            allowed_items.append(item)
-
-    if not allowed_items:
-        return Command(update={})
-
     # Add all items from the suggestion
-    updated_meal = state[meal_type] + allowed_items
+    updated_meal = state[meal_type] + suggestion.items
 
     # Update planning phase if we're starting to build meals - use temporary state to check transitions
     temp_state = state.model_copy()
@@ -504,7 +442,7 @@ def suggest_foods_to_meet_goals(
     prompt = f"""{nutrition_context}
 
 Dietary restrictions: {', '.join(restrictions) if restrictions else 'None'}
-
+{('⚠️ CRITICAL: Only suggest foods that are FULLY compliant with the above dietary restrictions!' + chr(10) + 'This is mandatory - no exceptions allowed.' + chr(10)) if restrictions else ''}
 Provide 5-7 specific food suggestions with portions that would help fill the remaining nutrition gaps.
 Focus on foods that are high in the most needed nutrients."""
 
@@ -543,7 +481,8 @@ def generate_remaining_meals(
 
     if user_profile.dietary_restrictions:
         context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
-        context += "IMPORTANT: Do not include any foods that violate these restrictions!\n"
+        context += "⚠️ CRITICAL: You MUST NOT include ANY foods that violate these restrictions!\n"
+        context += "This is extremely important - double-check every single item.\n\n"
     if user_profile.preferred_cuisines:
         context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
 
@@ -583,13 +522,11 @@ Generate meals with specific portions. Format as JSON:
                 if meal_type in meal_data:
                     items = []
                     for item_data in meal_data[meal_type]:
-                        # Validate each item
-                        if is_food_allowed(item_data["food"], user_profile.dietary_restrictions):
-                            items.append(MealItem(
-                                food=item_data["food"],
-                                amount=item_data["amount"],
-                                unit=item_data.get("unit", "serving")
-                            ))
+                        items.append(MealItem(
+                            food=item_data["food"],
+                            amount=item_data["amount"],
+                            unit=item_data.get("unit", "serving")
+                        ))
                     temp_state[meal_type] = items
 
             # Create a full temp state for checking phase transitions
@@ -652,7 +589,8 @@ def generate_meal_plan(
     if user_profile:
         if user_profile.dietary_restrictions:
             context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
-            context += "IMPORTANT: Do not include any foods that violate these restrictions!\n"
+            context += "⚠️ CRITICAL: You MUST NOT include ANY foods that violate these restrictions!\n"
+            context += "This is extremely important - double-check every single item.\n\n"
         if user_profile.preferred_cuisines:
             context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
         if user_profile.cooking_time_preference:
@@ -703,15 +641,13 @@ For each meal, format as a JSON list of items:
                 if meal_type in meal_data:
                     items = []
                     for item_data in meal_data[meal_type]:
-                        # Validate each item
-                        if is_food_allowed(item_data["food"], user_profile.dietary_restrictions):
-                            item = MealItem(
-                                food=item_data["food"],
-                                amount=item_data["amount"],
-                                unit=item_data.get("unit", "serving")
-                            )
-                            items.append(item)
-                            all_items.append(f"{item.amount} {item.unit} of {item.food}")
+                        item = MealItem(
+                            food=item_data["food"],
+                            amount=item_data["amount"],
+                            unit=item_data.get("unit", "serving")
+                        )
+                        items.append(item)
+                        all_items.append(f"{item.amount} {item.unit} of {item.food}")
                     temp_state[meal_type] = items
                 else:
                     temp_state[meal_type] = []
@@ -775,7 +711,8 @@ def suggest_meal(
 
     if user_profile.dietary_restrictions:
         context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
-        context += "IMPORTANT: Only suggest foods that comply with these restrictions!\n"
+        context += "⚠️ CRITICAL: Only suggest foods that STRICTLY comply with these restrictions!\n"
+        context += "This is the most important requirement - verify every ingredient.\n\n"
 
     if preferences:
         context += f"Additional preferences: {json.dumps(preferences)}\n"
@@ -820,16 +757,15 @@ Provide 3 {meal_type} suggestions in JSON format with specific portions:
             for key, data in suggestions_data.items():
                 if key.startswith("option_"):
                     items = []
-                    # Validate each item in suggestion
+                    # Convert each item in suggestion
                     for item_data in data.get("items", []):
-                        if is_food_allowed(item_data["food"], user_profile.dietary_restrictions):
-                            items.append(MealItem(
-                                food=item_data["food"],
-                                amount=item_data["amount"],
-                                unit=item_data.get("unit", "serving")
-                            ))
+                        items.append(MealItem(
+                            food=item_data["food"],
+                            amount=item_data["amount"],
+                            unit=item_data.get("unit", "serving")
+                        ))
 
-                    if items:  # Only save suggestion if it has valid items
+                    if items:  # Save suggestion if it has items
                         nutrition = NutritionInfo(
                             calories=data["nutrition"]["calories"],
                             protein=data["nutrition"]["protein"],
@@ -901,8 +837,9 @@ def get_meal_ideas(
     context = f"Provide meal ideas based on: {criteria}\n\n"
 
     if user_profile.dietary_restrictions:
-        context += f"Keep in mind dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
-        context += "Only suggest meals that comply with these restrictions!\n"
+        context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
+        context += "⚠️ CRITICAL: Only suggest meals that COMPLETELY comply with these restrictions!\n"
+        context += "Every single ingredient must be allowed - this is non-negotiable.\n\n"
 
     prompt = f"""{context}
 
