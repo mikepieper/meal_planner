@@ -78,13 +78,13 @@ class UserProfile(BaseModel):
 #     description: Optional[str] = Field(None, description="Brief description")
 
 
-# class MealPreferences(BaseModel):
-#     """Input model for meal preferences with validation for tool usage."""
-#     cuisine: Optional[str] = Field(None, description="Preferred cuisine type (e.g., 'italian', 'mediterranean', 'asian', 'mexican')")
-#     cooking_time: Optional[str] = Field(None, description="Cooking time preference: 'quick' (<15 min), 'moderate' (15-45 min), 'extensive' (45+ min)")
-#     meal_style: Optional[str] = Field(None, description="Style preference (e.g., 'light', 'hearty', 'comfort food', 'fresh')")
-#     ingredients_to_include: Optional[List[str]] = Field(None, description="Specific ingredients to include")
-#     ingredients_to_avoid: Optional[List[str]] = Field(None, description="Specific ingredients to avoid (beyond dietary restrictions)")
+class MealPreferences(BaseModel):
+    """Input model for meal preferences with validation for tool usage."""
+    cuisine: Optional[str] = Field(None, description="Preferred cuisine type (e.g., 'italian', 'mediterranean', 'asian', 'mexican')")
+    cooking_time: Optional[str] = Field(None, description="Cooking time preference: 'quick' (<15 min), 'moderate' (15-45 min), 'extensive' (45+ min)")
+    meal_style: Optional[str] = Field(None, description="Style preference (e.g., 'light', 'hearty', 'comfort food', 'fresh')")
+    ingredients_to_include: Optional[List[str]] = Field(None, description="Specific ingredients to include")
+    ingredients_to_avoid: Optional[List[str]] = Field(None, description="Specific ingredients to avoid (beyond dietary restrictions)")
 
 
 # class MealPlanResponse(BaseModel):
@@ -104,12 +104,6 @@ class UserProfile(BaseModel):
 
 # class ConversationContext(BaseModel):
 #     """Tracks conversation state and memory."""
-#     # Suggestions presented to user
-#     last_suggestions: Dict[str, Dict[str, MealSuggestion]] = Field(
-#         default_factory=dict,
-#         description="Last suggestions shown for each meal type"
-#     )
-
 #     # Planning phase tracking
 #     planning_phase: Literal["gathering_info", "setting_goals", "building_meals", "optimizing", "complete"] = Field(
 #         "gathering_info",
@@ -122,11 +116,6 @@ class UserProfile(BaseModel):
 #         description="Preferences mentioned during conversation"
 #     )
 
-#     # Meal templates from successful combinations
-#     saved_templates: Dict[str, MealSuggestion] = Field(
-#         default_factory=dict,
-#         description="Saved meal templates for reuse"
-#     )
 
 
 # ========== State Definition ==========

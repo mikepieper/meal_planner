@@ -15,32 +15,19 @@ from src.tools.manual_planning_tools import (
     clear_meal,
     clear_all_meals,
 )
-from src.tools import (
-    # # Meal Management
-    # add_meal_item,
-    # add_multiple_items,
-    # remove_meal_item,
-    # view_current_meals,
-    # clear_meal,
-    # clear_all_meals,
-    # # User Profile
-    # update_user_profile,
-    # # Nutrition
-    # set_nutrition_goals,
-    # analyze_meal_nutrition,
-    # analyze_daily_nutrition,
-    # suggest_foods_to_meet_goals,
-    # # Planning
-    # generate_meal_plan,
-    # generate_remaining_meals,
-    # suggest_meal,
-    # get_meal_ideas,
-    # # Utility
-    # generate_shopping_list
+from src.tools.tools import (
+    update_user_profile,
+    set_nutrition_goals,
+    suggest_foods_to_meet_goals,
+    generate_meal_plan,
+    get_meal_suggestions,
 )
+from src.tools.tool_utils import generate_shopping_list
+
 
 # ====== LLM ======
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+
 tools = [
     # Manual Planning Tools
     add_meal_item,
@@ -49,24 +36,20 @@ tools = [
     view_current_meal_plan,
     clear_meal,
     clear_all_meals,
-    
-    # # User Profile
-    # update_user_profile,
-    # # Nutrition
-    # set_nutrition_goals,
-    # analyze_meal_nutrition,
-    # analyze_daily_nutrition,
-    # suggest_foods_to_meet_goals,
-    # # Planning
-    # generate_meal_plan,
-    # generate_remaining_meals,
-    # suggest_meal,
-    # get_meal_ideas,
-    # # Utility
-    # generate_shopping_list
-
+    # Utility
+    generate_shopping_list,
+    # Tools - User Profile
+    update_user_profile,
+    # Tools - Nutrition
+    set_nutrition_goals,
+    # Tools - Planning
+    suggest_foods_to_meet_goals,
+    generate_meal_plan,
+    get_meal_suggestions,
 ]
+
 llm_with_tools = llm.bind_tools(tools)
+
 
 # ====== AGENT ======
 def agent_node(state: MealPlannerState) -> dict:
@@ -80,12 +63,6 @@ def agent_node(state: MealPlannerState) -> dict:
     # Add conversation summary if it exists
     if summary:
         llm_messages.append(SystemMessage(content=f"Summary of conversation history: {summary}"))
-
-    # # Add phase-specific guidance
-    # phase = state.conversation_context.planning_phase
-    # phase_guidance = get_phase_guidance(phase, state)
-    # if phase_guidance:
-    #     llm_messages.append(SystemMessage(content=phase_guidance))
 
     # # Add nutrition context if relevant
     # if state.current_totals and state.nutrition_goals:

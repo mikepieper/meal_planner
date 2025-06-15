@@ -6,7 +6,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command, ToolMessage
 
-from src.models import MealPlannerState, NutritionGoals, MealPreferences
+from src.models import MealPlannerState, MealPreferences, NutritionGoals
 from src.tool_utils import add_dietary_restrictions_context
 from src.constants import MEAL_TYPES, MealType
 
@@ -69,6 +69,7 @@ def update_user_profile(
 
 # === NUTRITION TOOLS ===
 
+# NOTE: Nutrition tracking is currently disabled
 @tool
 def set_nutrition_goals(
     daily_calories: int,
@@ -153,39 +154,59 @@ def set_nutrition_goals(
 @tool
 def suggest_foods_to_meet_goals(
     state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    focus_area: Optional[str] = None
 ) -> str:
-    """Suggest specific foods with portions to fill remaining nutrition gaps.
+    """Suggest specific foods with portions based on dietary preferences and optional focus areas.
     
-    Analyzes current nutrition totals vs. goals and recommends 5-7 specific foods
-    that would help reach daily targets. Respects all dietary restrictions.
+    Provides 5-7 specific food recommendations that respect dietary restrictions
+    and align with user preferences. Can target specific nutritional focus areas
+    if specified.
+    
+    Parameters:
+    - focus_area: Optional nutritional focus (e.g., "high protein", "high fiber", "low calorie")
     
     This tool is most useful when:
-    - Daily nutrition is partially complete but gaps remain
     - User wants targeted food recommendations rather than full meals
-    - Fine-tuning nutrition to meet specific macro targets
+    - Looking for specific types of foods (high protein, etc.)
+    - Building meals incrementally with individual items
     
-    Requires nutrition goals to be set first. Returns suggestions prioritized
-    by the largest remaining nutrition gaps (e.g., high-protein foods if protein is low).
+    PREREQUISITES:
+    - Works best when dietary restrictions are set via update_user_profile()
+    - More personalized if preferences (cuisines, cooking time) are also set
     
-    Use this instead of suggest_meal when you want individual food suggestions
-    rather than complete meal options.
+    Examples:
+    - suggest_foods_to_meet_goals()  # General healthy suggestions
+    - suggest_foods_to_meet_goals(focus_area="high protein")  # Protein-focused
+    - suggest_foods_to_meet_goals(focus_area="quick breakfast options")
     """
-    if not state.nutrition_goals:
-        return "Please set nutrition goals first to get targeted suggestions."
-
     restrictions = state.user_profile.dietary_restrictions
+    preferences = state.user_profile
     
-    # Use the standardized nutrition context
-    nutrition_context = state.nutrition_context_for_prompts
+    # Build context based on what we know
+    context = "Suggest 5-7 specific foods with realistic portion sizes.\n\n"
     
-    prompt = f"""{nutrition_context}
+    if focus_area:
+        context += f"Focus on: {focus_area}\n\n"
+    
+    # Add dietary restrictions
+    context = add_dietary_restrictions_context(context, restrictions, "ONLY suggest foods that are FULLY compliant with")
+    
+    # Add preferences if available
+    if preferences.preferred_cuisines:
+        context += f"Preferred cuisines: {', '.join(preferences.preferred_cuisines)}\n"
+    if preferences.cooking_time_preference:
+        context += f"Cooking time preference: {preferences.cooking_time_preference}\n"
+    if preferences.health_goals:
+        context += f"Health goals: {', '.join(preferences.health_goals)}\n"
+    
+    prompt = f"""{context}
 
-{add_dietary_restrictions_context("", restrictions, "ONLY suggest foods that are FULLY compliant with")}Provide 5-7 specific food suggestions with portions that would help fill the remaining nutrition gaps.
-Focus on foods that are high in the most needed nutrients."""
+Provide 5-7 specific food suggestions with portions.
+Focus on variety and practical options that align with any stated preferences."""
 
     response = llm.invoke(prompt)
-    return f"**Foods to help meet your remaining goals:**\n\n{response.content}"
+    return f"**Food suggestions{f' for {focus_area}' if focus_area else ''}:**\n\n{response.content}"
 
 @tool
 def generate_meal_plan(
@@ -215,6 +236,10 @@ def generate_meal_plan(
       * ingredients_to_include: List of specific ingredients to include
       * ingredients_to_avoid: List of ingredients to avoid
     
+    PREREQUISITES:
+    - For best results, set dietary restrictions via update_user_profile() first
+    - User preferences (cuisines, cooking time) improve personalization
+    
     Examples:
     - generate_meal_plan()  # Auto-fill empty meals only
     - generate_meal_plan(meal_types="all")  # Complete daily plan
@@ -225,7 +250,6 @@ def generate_meal_plan(
     implement approved suggestions using add_multiple_items.
     """
     user_profile = state.user_profile
-    nutrition_goals = state.nutrition_goals
 
     # Determine which meals to generate
     if meal_types is None:
@@ -261,10 +285,6 @@ def generate_meal_plan(
             else:
                 result += f"\n{meal_type.capitalize()}: Empty\n"
 
-    # Add current nutrition status if goals are set
-    if nutrition_goals and state.nutrition_summary:
-        result += f"\n**Current Nutrition:** {state.nutrition_summary}\n"
-
     result += "\n---\n\n"
     
     # Format header based on what we're generating
@@ -276,12 +296,8 @@ def generate_meal_plan(
         result += f"**Suggested meals for {', '.join(meals_to_generate)}:**\n\n"
 
     # Build context for generation
-    context = f"Generate meals for these slots: {', '.join(meals_to_generate)}\n\n"
+    context = f"Generate balanced, healthy meals for these slots: {', '.join(meals_to_generate)}\n\n"
     
-    # Add nutrition context if goals are set
-    if state.nutrition_context_for_prompts:
-        context += state.nutrition_context_for_prompts + "\n\n"
-
     # Add dietary restrictions and preferences
     context = add_dietary_restrictions_context(context, user_profile.dietary_restrictions)
     if user_profile.preferred_cuisines:
@@ -352,7 +368,11 @@ def get_meal_suggestions(
     """Generate meal suggestions based on meal type and/or specific criteria.
     
     Flexible tool that can handle both specific meal slots and general meal ideas.
-    Takes into account current nutrition needs, dietary restrictions, and preferences.
+    Takes into account dietary restrictions and preferences.
+    
+    PREREQUISITES:
+    - For best results, set dietary restrictions via update_user_profile() first
+    - User preferences (cuisines, cooking time) improve personalization
     
     Parameters:
     - meal_type: Optional - 'breakfast', 'lunch', 'dinner', or 'snacks'
@@ -391,18 +411,14 @@ def get_meal_suggestions(
     else:
         context = f"Suggest {num_suggestions} meal ideas based on: {criteria}\n\n"
     
-    # Add nutrition context if available
-    if state.nutrition_context_for_prompts:
-        context += state.nutrition_context_for_prompts + "\n\n"
-        
-        # Add specific guidance based on remaining nutrition
-        if state.nutrition_goals:
-            totals = state.current_totals
-            goals = state.nutrition_goals
-            protein_remaining = max(0, goals.protein_target - totals.protein)
-            
-            if protein_remaining > 50:
-                context += "PRIORITIZE HIGH PROTEIN OPTIONS\n\n"
+    # Add health goals if available for general guidance
+    if user_profile.health_goals:
+        context += f"User health goals: {', '.join(user_profile.health_goals)}\n"
+        # Add specific guidance based on health goals
+        if "muscle gain" in user_profile.health_goals or "high protein" in str(user_profile.health_goals).lower():
+            context += "PRIORITIZE HIGH PROTEIN OPTIONS\n\n"
+        elif "weight loss" in user_profile.health_goals:
+            context += "Focus on nutrient-dense, lower-calorie options\n\n"
     
     # Add dietary restrictions
     context = add_dietary_restrictions_context(context, user_profile.dietary_restrictions, 
