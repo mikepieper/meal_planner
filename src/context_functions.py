@@ -1,0 +1,78 @@
+from src.models import MealPlannerState
+
+
+def view_current_meal_plan(state: MealPlannerState) -> str:
+    """Display a comprehensive overview of the current meal plan.
+    
+    Shows all meals (breakfast, lunch, dinner, snacks) with their items and portions,
+    current daily nutrition totals, and progress toward nutrition goals if set.
+    
+    This tool is essential for:
+    - Reviewing what's currently planned
+    - Checking progress toward nutrition goals
+    - Identifying empty meals that need to be filled
+    
+    Returns a formatted string with:
+    - All meal items with portions
+    - Daily nutrition totals (calories, protein, carbs, fat)
+    - Goal progress percentages if nutrition goals are set
+    
+    Use this tool before making meal planning decisions to understand the current state.
+    """
+    result = "Current Meal Plan:\n\n"
+
+    for meal_type in MEAL_TYPES:
+        items = state[meal_type]
+        if items:
+            result += f"**{meal_type.capitalize()}:**\n"
+            for item in items:
+                result += f"  - {item.amount} {item.unit} of {item.food}\n"
+            result += "\n"
+        else:
+            result += f"**{meal_type.capitalize()}:** Empty\n\n"
+
+    # Add current nutrition totals
+    result += f"\n**Current Daily Totals:**\n- {state.nutrition_summary}\n"
+
+    # Compare to goals if set
+    if state.nutrition_goals:
+        goals = state.nutrition_goals
+        totals = state.current_totals
+        result += "\n**Progress to Goals:**\n"
+        calories_percent = (totals.calories/goals.daily_calories*100)
+        protein_percent = (totals.protein/goals.protein_target*100)
+        result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
+        result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
+
+    return result.strip()
+
+
+def get_daily_nutrition_summary(state: MealPlannerState) -> str:
+    """Return total daily nutritional content and compare to goals."""
+    result = "**Daily Nutrition Analysis:**\n\n"
+    result += f"**Current Totals:**\n- {state.nutrition_summary}\n"
+
+    if state.nutrition_goals:
+        goals = state.nutrition_goals
+        totals = state.current_totals
+        result += "\n**Goals:**\n"
+        result += f"- Calories: {goals.daily_calories}\n"
+        result += f"- Protein: {goals.protein_target:.0f}g\n"
+        result += f"- Carbohydrates: {goals.carb_target:.0f}g\n"
+        result += f"- Fat: {goals.fat_target:.0f}g\n"
+
+        result += "\n**Progress:**\n"
+        result += f"- Calories: {(totals.calories/goals.daily_calories*100):.0f}% of goal\n"
+        result += f"- Protein: {(totals.protein/goals.protein_target*100):.0f}% of goal\n"
+        result += f"- Carbohydrates: {(totals.carbohydrates/goals.carb_target*100):.0f}% of goal\n"
+        result += f"- Fat: {(totals.fat/goals.fat_target*100):.0f}% of goal\n"
+
+        # Calculate remaining needs
+        result += "\n**Remaining for the day:**\n"
+        result += f"- Calories: {max(0, goals.daily_calories - totals.calories):.0f}\n"
+        result += f"- Protein: {max(0, goals.protein_target - totals.protein):.0f}g\n"
+        result += f"- Carbohydrates: {max(0, goals.carb_target - totals.carbohydrates):.0f}g\n"
+        result += f"- Fat: {max(0, goals.fat_target - totals.fat):.0f}g\n"
+
+    return result
+    

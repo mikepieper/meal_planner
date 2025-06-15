@@ -101,7 +101,6 @@ class MealPlannerState(TypedDict):
 ### Meal Management
 - `add_meal_item` - Add single food items
 - `add_multiple_items` - Batch addition of multiple items
-- `add_meal_from_suggestion` - Add complete suggested meals
 - `remove_meal_item` - Remove specific items
 - `view_current_meals` - View plan with nutrition totals
 - `clear_meal` / `clear_all_meals` - Reset meals

@@ -6,10 +6,10 @@ from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
 from src.agent_prompt import AGENT_PROMPT
 from src.models import MealPlannerState
 from src.summarize_node import summarize_conversation, should_summarize
+# Tool Imports
 from src.tools.manual_planning_tools import (
     add_meal_item,
     add_multiple_items,
-    add_meal_from_suggestion,
     remove_meal_item,
     view_current_meal_plan,
     clear_meal,
@@ -19,7 +19,6 @@ from src.tools import (
     # # Meal Management
     # add_meal_item,
     # add_multiple_items,
-    # add_meal_from_suggestion,
     # remove_meal_item,
     # view_current_meals,
     # clear_meal,
@@ -46,7 +45,6 @@ tools = [
     # Manual Planning Tools
     add_meal_item,
     add_multiple_items,
-    add_meal_from_suggestion,
     remove_meal_item,
     view_current_meal_plan,
     clear_meal,
@@ -67,7 +65,6 @@ tools = [
     # # Utility
     # generate_shopping_list
 
-    # add_meal_from_suggestion,
 ]
 llm_with_tools = llm.bind_tools(tools)
 

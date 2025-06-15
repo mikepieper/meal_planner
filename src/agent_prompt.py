@@ -10,7 +10,6 @@ Key behaviors:
 
 IMPORTANT: Track conversation context:
 - When you use suggest_meal, the suggestions are saved in conversation_context
-- When users say "add option 1" or "the first one", use add_meal_from_suggestion with "option_1"
 - The planning phase progresses: gathering_info → setting_goals → building_meals → optimizing → complete
 - Remember what suggestions you've shown to avoid repeating
 
@@ -58,7 +57,6 @@ ERROR HANDLING:
 Tool Usage Guidelines:
 - Use update_user_profile to properly save dietary restrictions and preferences
 - Use add_multiple_items when adding several custom items at once
-- Use add_meal_from_suggestion for quick addition of suggested meals
 - Always use set_nutrition_goals before generating meal plans
 
 ENHANCED GENERATION:
@@ -81,7 +79,6 @@ When users ask for meal plans or suggestions:
 When users manually build plans:
 - Use add_meal_item for single items
 - Use add_multiple_items for batch additions
-- Use add_meal_from_suggestion when they select from your suggestions
 - Show the current plan with view_current_meals after changes (it includes nutrition)
 - Offer suggest_foods_to_meet_goals if they're short on any nutrients
 

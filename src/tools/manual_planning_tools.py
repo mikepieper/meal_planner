@@ -17,57 +17,6 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
 
 @tool
-def view_current_meal_plan(
-    state: Annotated[MealPlannerState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
-    """Display a comprehensive overview of the current meal plan.
-    
-    Shows all meals (breakfast, lunch, dinner, snacks) with their items and portions,
-    current daily nutrition totals, and progress toward nutrition goals if set.
-    
-    This tool is essential for:
-    - Reviewing what's currently planned
-    - Checking progress toward nutrition goals
-    - Identifying empty meals that need to be filled
-    
-    Returns a formatted string with:
-    - All meal items with portions
-    - Daily nutrition totals (calories, protein, carbs, fat)
-    - Goal progress percentages if nutrition goals are set
-    
-    Use this tool before making meal planning decisions to understand the current state.
-    """
-    result = "Current Meal Plan:\n\n"
-
-    for meal_type in MEAL_TYPES:
-        items = state[meal_type]
-        if items:
-            result += f"**{meal_type.capitalize()}:**\n"
-            for item in items:
-                result += f"  - {item.amount} {item.unit} of {item.food}\n"
-            result += "\n"
-        else:
-            result += f"**{meal_type.capitalize()}:** Empty\n\n"
-
-    # Add current nutrition totals
-    result += f"\n**Current Daily Totals:**\n- {state.nutrition_summary}\n"
-
-    # Compare to goals if set
-    if state.nutrition_goals:
-        goals = state.nutrition_goals
-        totals = state.current_totals
-        result += "\n**Progress to Goals:**\n"
-        calories_percent = (totals.calories/goals.daily_calories*100)
-        protein_percent = (totals.protein/goals.protein_target*100)
-        result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
-        result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
-
-    return result.strip()
-
-
-
-@tool
 def add_meal_item(
     meal_type: MealType,
     food: str,
@@ -306,3 +255,4 @@ def clear_all_meals(
             )
         ]
     )
+

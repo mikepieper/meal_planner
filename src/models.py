@@ -38,11 +38,11 @@ from fractions import Fraction
 # #     tags: List[str] = Field(default_factory=list)  # vegetarian, vegan, gluten-free, etc.
 
 
-# class MealItem(BaseModel):
-#     """Information about a single item in a meal."""
-#     food: str = Field(..., description="Name of the food item (e.g., 'chicken breast', 'brown rice')")
-#     amount: str = Field(..., description="Quantity as string - supports whole numbers, decimals, and fractions (e.g., '1', '2.5', '1/2', '1 1/4')")
-#     unit: str = Field("serving", description="Unit of measurement (e.g., 'cup', 'oz', 'slice', 'large', 'medium', 'serving')")
+class MealItem(BaseModel):
+    """Information about a single item in a meal."""
+    food: str = Field(..., description="Name of the food item (e.g., 'chicken breast', 'brown rice')")
+    amount: str = Field(..., description="Quantity as string - supports whole numbers, decimals, and fractions (e.g., '1', '2.5', '1/2', '1 1/4')")
+    unit: str = Field("serving", description="Unit of measurement (e.g., 'cup', 'oz', 'slice', 'large', 'medium', 'serving')")
 
 
 # class NutritionInfo(BaseModel):
@@ -62,12 +62,12 @@ from fractions import Fraction
 #     fat_target: Optional[float] = Field(None, description="Daily fat target in grams")
 
 
-# class UserProfile(BaseModel):
-#     """User profile containing preferences and nutrition information."""
-#     dietary_restrictions: List[str] = Field(default_factory=list, description="Allergies, intolerances, preferences")
-#     preferred_cuisines: List[str] = Field(default_factory=list, description="Favorite cuisine types")
-#     cooking_time_preference: Optional[str] = Field(None, description="Quick, moderate, or extensive")
-#     health_goals: List[str] = Field(default_factory=list, description="Weight loss, muscle gain, etc.")
+class UserProfile(BaseModel):
+    """User profile containing preferences and nutrition information."""
+    dietary_restrictions: List[str] = Field(default_factory=list, description="Allergies, intolerances, preferences")
+    preferred_cuisines: List[str] = Field(default_factory=list, description="Favorite cuisine types")
+    cooking_time_preference: Optional[str] = Field(None, description="Quick, moderate, or extensive")
+    health_goals: List[str] = Field(default_factory=list, description="Weight loss, muscle gain, etc.")
 
 
 # class MealSuggestion(BaseModel):
@@ -138,14 +138,14 @@ class MealPlannerState(BaseModel):
     # Conversation summary for managing long conversations
     summary: str = Field("", description="Summary of earlier conversation history")
 
-#     # Simple meal storage - just lists of MealItems
-#     breakfast: List[MealItem] = Field(default_factory=list)
-#     lunch: List[MealItem] = Field(default_factory=list)
-#     dinner: List[MealItem] = Field(default_factory=list)
-#     snacks: List[MealItem] = Field(default_factory=list)
+    # Simple meal storage - just lists of MealItems
+    breakfast: List[MealItem] = Field(default_factory=list)
+    lunch: List[MealItem] = Field(default_factory=list)
+    dinner: List[MealItem] = Field(default_factory=list)
+    snacks: List[MealItem] = Field(default_factory=list)
 
-#     # User information
-#     user_profile: UserProfile = Field(default_factory=UserProfile)
+    # User information
+    user_profile: UserProfile = Field(default_factory=UserProfile)
 #     nutrition_goals: Optional[NutritionGoals] = None
 
 #     # Enhanced conversation tracking

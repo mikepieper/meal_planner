@@ -2,16 +2,6 @@
 
 ## What Was Implemented
 
-1. **Nutrition Tracking System**
-   - Added `current_totals` to state for running nutrition calculations
-   - Created `calculate_meal_totals()` helper function
-   - All meal modifications now update nutrition totals automatically
-
-2. **Dietary Restriction Validation**
-   - `is_food_allowed()` - Intelligent validation using LLM
-   - `get_restriction_violation()` - Identifies specific violations
-   - All add operations validate foods before adding
-
 3. **Smart Suggestions**
    - `suggest_meal` now considers remaining nutrition needs
    - `suggest_foods_to_meet_goals` - New tool for targeted suggestions
@@ -82,11 +72,6 @@ User: "Show me high-protein breakfast options"
 Agent: [suggest_meal considers 2000 cal target, high protein need]
 State: Suggestions saved, all gluten-free validated
 
-Turn 4:  
-User: "Add option 2, then show my progress"
-Agent: [add_meal_from_suggestion + view_current_meals]
-Response: Shows meals + "450/2000 cal (23%), 35/150g protein (23%)"
-
 Turn 5:
 User: "What should I eat to hit my protein goal?"
 Agent: [suggest_foods_to_meet_goals]
@@ -109,10 +94,6 @@ Response: "Need 115g more protein. Try: Greek yogurt (20g), chicken breast (40g)
 2. Update meals  
 3. Calculate new totals
 4. Return Command with updates
-
-# Consistent error handling:
-if not is_food_allowed(food, restrictions):
-    return Command(update={})  # Let agent explain
 
 # Smart context in suggestions:
 if protein_remaining > 50:

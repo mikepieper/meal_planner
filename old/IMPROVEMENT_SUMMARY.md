@@ -11,7 +11,6 @@ We successfully implemented 5 major improvements to transform the meal planning 
 
 **Implementation**:
 - Added `ConversationContext` with suggestion memory, phase tracking, and preference storage
-- Created `add_meal_from_suggestion` for one-command meal additions
 - Updated `suggest_meal` to save suggestions for later reference
 
 **Impact**: 

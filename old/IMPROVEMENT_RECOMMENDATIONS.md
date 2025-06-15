@@ -22,41 +22,7 @@ def update_user_profile(...) -> Command:
 - Remember user's selections and preferences shown in conversation
 - Track conversation phase (gathering info, building, optimizing, etc.)
 
-## 2. Tool Enhancements
 
-### Batch Operations
-**Problem**: Multiple sequential tool calls for related items
-```python
-# Current: 5 separate tool calls
-add_meal_item("breakfast", "Greek yogurt", "1", "cup")
-add_meal_item("breakfast", "granola", "1/4", "cup")
-# ... 3 more calls
-
-# Needed:
-@tool
-def add_meal_from_suggestion(meal_type: str, suggestion_id: str) -> Command:
-    """Add a complete suggested meal by ID"""
-    
-@tool
-def add_multiple_items(meal_type: str, items: List[Dict]) -> Command:
-    """Add multiple items in one command"""
-```
-
-### Intelligent Meal Generation
-**Problem**: `generate_meal_plan` overwrites existing meals
-- Need `generate_remaining_meals()` tool
-- Should respect and build around existing meal items
-- Consider already consumed calories/nutrition
-
-### Dietary Validation
-**Problem**: Tools don't validate against restrictions
-```python
-@tool
-def add_meal_item(...) -> Command:
-    # Should check dietary restrictions before adding
-    if not is_food_allowed(food, state.user_profile.dietary_restrictions):
-        return Command(update={})  # With appropriate message
-```
 
 ## 3. Nutrition Intelligence
 

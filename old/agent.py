@@ -8,7 +8,6 @@ from src.tools import (
     # Meal Management
     add_meal_item,
     add_multiple_items,
-    add_meal_from_suggestion,
     remove_meal_item,
     view_current_meals,
     clear_meal,
@@ -39,7 +38,6 @@ tools = [
     # Meal Management
     add_meal_item,
     add_multiple_items,
-    add_meal_from_suggestion,
     remove_meal_item,
     view_current_meals,
     clear_meal,

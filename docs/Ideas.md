@@ -1,0 +1,1 @@
+1. How much of state tracking can we get rid of by summarization. If it doesn't need to be exact and is complex like the meal plan, then I think the summarization prompt could just be expanded to handle it.

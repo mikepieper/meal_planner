@@ -18,12 +18,9 @@ def update_meal_with_items(
     temp_state = state.model_copy()
     setattr(temp_state, meal_type, updated_meal)
     
-    # new_context = update_planning_phase(temp_state, state["conversation_context"])
-
     return {
         meal_type: updated_meal,
         "current_meal": meal_type,
-        "conversation_context": new_context
     }
 
 # def update_planning_phase(state: MealPlannerState, context) -> Any:
