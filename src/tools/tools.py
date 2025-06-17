@@ -4,11 +4,13 @@ from langchain_core.tools import tool
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
-from langgraph.types import Command, ToolMessage
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
 
-from src.models import MealPlannerState, MealPreferences, NutritionGoals
-from src.tool_utils import add_dietary_restrictions_context
-from src.constants import MEAL_TYPES, MealType
+from src.context_functions import get_user_profile_context, get_dietary_restrictions_context
+from src.models import MealPlannerState, MealPreferences, NutritionGoals, MEAL_TYPES, MealType
+from src.context_functions import get_dietary_restrictions_context
+
 
 # Initialize LLM for generation tools
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
@@ -56,31 +58,27 @@ def update_user_profile(
         new_profile.health_goals = health_goals
 
 
-    return Command(
-        update={"user_profile": new_profile},
-        messages=[
-            ToolMessage(
-                content=f"Updated user profile",
-                tool_call_id=tool_call_id
-            )
-        ]
-    )
+    return Command(update={"user_profile": new_profile}) # No message since silent tool
 
 
 # === NUTRITION TOOLS ===
 
-# NOTE: Nutrition tracking is currently disabled
 @tool
 def set_nutrition_goals(
-    daily_calories: int,
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    diet_type: Literal["balanced", "high-protein", "low-carb", "keto", "vegetarian", "vegan"] = "balanced"
+    daily_calories: Optional[int] = None,
+    diet_type: Optional[Literal["balanced", "high-protein", "low-carb", "keto", "custom"]] = None,
+    protein_percent: Optional[float] = None,
+    carb_percent: Optional[float] = None,
+    fat_percent: Optional[float] = None
 ) -> Command:
-    """Set personalized daily nutrition goals with macro targets.
+    """Set or update personalized daily nutrition goals with macro targets.
     
-    This tool establishes daily calorie and macronutrient targets based on the specified diet type.
-    It automatically calculates protein, carbohydrate, and fat targets based on the diet approach.
+    This tool establishes or updates daily calorie and macronutrient targets. You can:
+    - Set initial goals with calories and diet type
+    - Update any field individually
+    - Use custom macro percentages for personalized ratios
     
     Parameters:
     - daily_calories: Target daily calories (e.g., 2000, 1800, 2500)
@@ -89,65 +87,94 @@ def set_nutrition_goals(
       * "high-protein" - 30% protein, 40% carbs, 30% fat (muscle building/weight loss)
       * "low-carb" - 25% protein, 20% carbs, 55% fat (reduced carbohydrate)
       * "keto" - 20% protein, 5% carbs, 75% fat (ketogenic diet)
-      * "vegetarian" - 20% protein, 50% carbs, 30% fat (plant-based with dairy/eggs)
-      * "vegan" - 20% protein, 50% carbs, 30% fat (fully plant-based)
+      * "custom" - Use with custom macro percentages
+    - protein_percent: Custom protein percentage (0-1, e.g., 0.25 for 25%)
+    - carb_percent: Custom carbohydrate percentage (0-1, e.g., 0.45 for 45%)
+    - fat_percent: Custom fat percentage (0-1, e.g., 0.30 for 30%)
     
-    Example:
+    Note: When providing custom percentages, all three must be specified and sum to 1.0
+    
+    Examples:
     - set_nutrition_goals(daily_calories=2000, diet_type="high-protein")
     - set_nutrition_goals(daily_calories=1800, diet_type="balanced")
+    - set_nutrition_goals(daily_calories=2200, protein_percent=0.25, carb_percent=0.45, fat_percent=0.30)
+    - set_nutrition_goals(diet_type="keto")  # Update diet type only
+    - set_nutrition_goals(daily_calories=2500)  # Update calories only
     """
-    # Calculate macro targets based on diet type
-    if diet_type == "high-protein":
-        protein_percent = 0.30
-        carb_percent = 0.40
-        fat_percent = 0.30
-    elif diet_type == "low-carb":
-        protein_percent = 0.25
-        carb_percent = 0.20
-        fat_percent = 0.55
-    elif diet_type == "keto":
-        protein_percent = 0.20
-        carb_percent = 0.05
-        fat_percent = 0.75
-    else:  # balanced, vegetarian, vegan
-        protein_percent = 0.20
-        carb_percent = 0.50
-        fat_percent = 0.30
-
-    goals = NutritionGoals(
-        daily_calories=daily_calories,
-        diet_type=diet_type,
-        protein_target=daily_calories * protein_percent / 4,  # 4 cal/g protein
-        carb_target=daily_calories * carb_percent / 4,       # 4 cal/g carbs
-        fat_target=daily_calories * fat_percent / 9          # 9 cal/g fat
-    )
-
-    # Update conversation phase - always progress from gathering_info to setting_goals
-    context = state["conversation_context"]
-    new_context = context.model_copy()
-
-    if new_context.planning_phase == "gathering_info":
-        new_context.planning_phase = "setting_goals"
-
-    # If we already have meals, might need to jump to building_meals or optimizing
-    meals_with_items = sum(1 for meal in ["breakfast", "lunch", "dinner"] if state.get(meal))
-    if meals_with_items > 0:
-        new_context.planning_phase = "building_meals"
-        if meals_with_items >= 2:
-            new_context.planning_phase = "optimizing"
-
-    return Command(
-        update={
-            "nutrition_goals": goals,
-            "conversation_context": new_context
-        },
-        messages=[
-            ToolMessage(
-                content=f"Successfully set nutrition goals",
-                tool_call_id=tool_call_id
-            )
-        ]
-    )
+    # Get existing goals if any
+    current_goals = state.get("nutrition_goals")
+    
+    # Prepare data for creating/updating goals
+    goal_data = {}
+    
+    # If we have existing goals, start with their values
+    if current_goals:
+        goal_data = {
+            "daily_calories": current_goals.daily_calories,
+            "diet_type": current_goals.diet_type,
+            "protein_percent": current_goals.protein_percent,
+            "carb_percent": current_goals.carb_percent,
+            "fat_percent": current_goals.fat_percent
+        }
+    
+    # Update with any provided values
+    if daily_calories is not None:
+        goal_data["daily_calories"] = daily_calories
+    
+    if diet_type is not None:
+        goal_data["diet_type"] = diet_type
+        # When diet_type changes, clear custom percentages unless it's "custom"
+        if diet_type != "custom":
+            goal_data.pop("protein_percent", None)
+            goal_data.pop("carb_percent", None)
+            goal_data.pop("fat_percent", None)
+    
+    # Handle custom percentages
+    if protein_percent is not None or carb_percent is not None or fat_percent is not None:
+        goal_data["protein_percent"] = protein_percent
+        goal_data["carb_percent"] = carb_percent
+        goal_data["fat_percent"] = fat_percent
+    
+    # Ensure we have daily_calories for new goals
+    if "daily_calories" not in goal_data:
+        return Command(
+            messages=[
+                ToolMessage(
+                    content="Please provide daily_calories when setting nutrition goals for the first time",
+                    tool_call_id=tool_call_id
+                )
+            ]
+        )
+    
+    # Create or update the goals
+    try:
+        goals = NutritionGoals(**goal_data)
+        
+        # Build success message
+        message = "Successfully updated nutrition goals:\n"
+        message += f"- Daily calories: {goals.daily_calories}\n"
+        message += f"- Diet type: {goals.diet_type}\n"
+        message += f"- Macros: {goals.protein_percent*100:.0f}% protein, {goals.carb_percent*100:.0f}% carbs, {goals.fat_percent*100:.0f}% fat\n"
+        message += f"- Targets: {goals.protein_target:.0f}g protein, {goals.carb_target:.0f}g carbs, {goals.fat_target:.0f}g fat"
+        
+        return Command(
+            update={"nutrition_goals": goals},
+            messages=[
+                ToolMessage(
+                    content=message,
+                    tool_call_id=tool_call_id
+                )
+            ]
+        )
+    except ValueError as e:
+        return Command(
+            messages=[
+                ToolMessage(
+                    content=f"Error setting nutrition goals: {str(e)}",
+                    tool_call_id=tool_call_id
+                )
+            ]
+        )
 
 # === SMART SUGGESTION TOOLS ===
 
@@ -179,30 +206,15 @@ def suggest_foods_to_meet_goals(
     - suggest_foods_to_meet_goals()  # General healthy suggestions
     - suggest_foods_to_meet_goals(focus_area="high protein")  # Protein-focused
     - suggest_foods_to_meet_goals(focus_area="quick breakfast options")
-    """
-    restrictions = state.user_profile.dietary_restrictions
-    preferences = state.user_profile
-    
+    """    
     # Build context based on what we know
-    context = "Suggest 5-7 specific foods with realistic portion sizes.\n\n"
-    
+    context = ""
     if focus_area:
         context += f"Focus on: {focus_area}\n\n"
-    
-    # Add dietary restrictions
-    context = add_dietary_restrictions_context(context, restrictions, "ONLY suggest foods that are FULLY compliant with")
-    
-    # Add preferences if available
-    if preferences.preferred_cuisines:
-        context += f"Preferred cuisines: {', '.join(preferences.preferred_cuisines)}\n"
-    if preferences.cooking_time_preference:
-        context += f"Cooking time preference: {preferences.cooking_time_preference}\n"
-    if preferences.health_goals:
-        context += f"Health goals: {', '.join(preferences.health_goals)}\n"
-    
+    context += get_user_profile_context(state)    
     prompt = f"""{context}
 
-Provide 5-7 specific food suggestions with portions.
+Provide 5-7 specific food suggestions with realisticportions.
 Focus on variety and practical options that align with any stated preferences."""
 
     response = llm.invoke(prompt)
@@ -249,8 +261,6 @@ def generate_meal_plan(
     Returns formatted suggestions that the user can review. The agent will
     implement approved suggestions using add_multiple_items.
     """
-    user_profile = state.user_profile
-
     # Determine which meals to generate
     if meal_types is None:
         # Auto-detect empty meals
@@ -299,11 +309,7 @@ def generate_meal_plan(
     context = f"Generate balanced, healthy meals for these slots: {', '.join(meals_to_generate)}\n\n"
     
     # Add dietary restrictions and preferences
-    context = add_dietary_restrictions_context(context, user_profile.dietary_restrictions)
-    if user_profile.preferred_cuisines:
-        context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
-    if user_profile.cooking_time_preference:
-        context += f"Cooking time preference: {user_profile.cooking_time_preference}\n"
+    context += get_dietary_restrictions_context(state)
 
     # Add specific preferences if provided
     if preferences:

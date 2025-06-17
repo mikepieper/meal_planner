@@ -163,14 +163,3 @@ def add_item(food: str, state: State) -> Command:
         update={"items": state["items"] + [food]}
     )
 ```
-
-## Summary
-
-The Command pattern provides a clean, testable, and maintainable approach to state management in LangGraph. By returning Commands instead of directly mutating state, your tools become:
-
-- **Predictable**: Clear inputs and outputs
-- **Testable**: No side effects
-- **Composable**: Easy to chain operations
-- **Debuggable**: State changes are explicit
-
-This approach aligns with functional programming principles and makes your LangGraph applications more robust and easier to maintain. 

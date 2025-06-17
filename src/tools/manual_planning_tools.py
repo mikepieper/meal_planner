@@ -6,10 +6,10 @@ from langchain_core.tools import tool
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
-from langgraph.types import Command, ToolMessage
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
 
-from src.models import MealPlannerState, MealItem
-from src.constants import MEAL_TYPES, MealType
+from src.models import MealPlannerState, MealItem, MEAL_TYPES, MealType
 from src.tools.tool_utils import update_meal_with_items
 
 # Initialize LLM for generation tools

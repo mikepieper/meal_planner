@@ -6,6 +6,9 @@ import re
 from fractions import Fraction
 
 
+MEAL_TYPES = ["breakfast", "lunch", "dinner", "snacks"]
+MealType = Literal["breakfast", "lunch", "dinner", "snacks"]
+
 # # ========== Pydantic Models ==========
 
 # class NutrientConstraint(BaseModel):
@@ -23,19 +26,19 @@ from fractions import Fraction
 #     protein: NutrientConstraint
 
 
-# class FoodItem(BaseModel):
-#     """Represents a food item with nutritional information."""
-#     id: str
-#     name: str
-#     calories: float
-#     fat: float
-#     carbohydrates: float
-#     protein: float
-#     is_beverage: bool = False
-#     min_quantity: float = 0.0
-#     max_quantity: float = 1.0
-#     unit: str = "serving"
-# #     tags: List[str] = Field(default_factory=list)  # vegetarian, vegan, gluten-free, etc.
+class FoodItem(BaseModel):
+    """Represents a food item with nutritional information."""
+    id: str
+    name: str
+    calories: float
+    fat: float
+    carbohydrates: float
+    protein: float
+    is_beverage: bool = False
+    min_quantity: float = 0.0
+    max_quantity: float = 1.0
+    unit: str = "serving"
+#     tags: List[str] = Field(default_factory=list)  # vegetarian, vegan, gluten-free, etc.
 
 
 class MealItem(BaseModel):
@@ -45,21 +48,80 @@ class MealItem(BaseModel):
     unit: str = Field("serving", description="Unit of measurement (e.g., 'cup', 'oz', 'slice', 'large', 'medium', 'serving')")
 
 
-# class NutritionInfo(BaseModel):
-#     """Nutritional information."""
-#     calories: float = Field(0, description="Calories")
-#     protein: float = Field(0, description="Protein in grams")
-#     carbohydrates: float = Field(0, description="Carbohydrates in grams")
-#     fat: float = Field(0, description="Fat in grams")
+class NutritionInfo(BaseModel):
+    """Nutritional information."""
+    calories: float = Field(0, description="Calories")
+    protein: float = Field(0, description="Protein in grams")
+    carbohydrates: float = Field(0, description="Carbohydrates in grams")
+    fat: float = Field(0, description="Fat in grams")
 
-# # TODO: Duplicate fields for constraints
-# class NutritionGoals(BaseModel):
-#     """Daily nutrition goals."""
-#     daily_calories: int = Field(..., description="Target daily calories")
-#     diet_type: str = Field("balanced", description="Diet type: balanced, high-protein, low-carb, etc.")
-#     protein_target: Optional[float] = Field(None, description="Daily protein target in grams")
-#     carb_target: Optional[float] = Field(None, description="Daily carb target in grams")
-#     fat_target: Optional[float] = Field(None, description="Daily fat target in grams")
+class NutritionGoals(BaseModel):
+    """Daily nutrition goals with automatic macro calculation based on diet type or custom percentages."""
+    daily_calories: int = Field(..., description="Target daily calories")
+    diet_type: str = Field("balanced", description="Diet type: balanced, high-protein, low-carb, keto, vegetarian, vegan, or custom")
+    protein_percent: Optional[float] = Field(None, description="Protein percentage of daily calories (0-1)")
+    carb_percent: Optional[float] = Field(None, description="Carbohydrate percentage of daily calories (0-1)")
+    fat_percent: Optional[float] = Field(None, description="Fat percentage of daily calories (0-1)")
+    protein_target: Optional[float] = Field(None, description="Daily protein target in grams")
+    carb_target: Optional[float] = Field(None, description="Daily carb target in grams")
+    fat_target: Optional[float] = Field(None, description="Daily fat target in grams")
+
+    def __init__(self, **data):
+        """Initialize nutrition goals with automatic macro calculation."""
+        # Extract values we need
+        daily_calories = data.get('daily_calories')
+        diet_type = data.get('diet_type', 'balanced')
+        
+        # Check if custom percentages are provided
+        custom_protein = data.get('protein_percent')
+        custom_carb = data.get('carb_percent')
+        custom_fat = data.get('fat_percent')
+        
+        # If custom percentages are provided, use "custom" diet type
+        if custom_protein is not None or custom_carb is not None or custom_fat is not None:
+            data['diet_type'] = 'custom'
+            
+            # Validate that all percentages are provided for custom
+            if not all(x is not None for x in [custom_protein, custom_carb, custom_fat]):
+                raise ValueError("For custom diet type, all three macro percentages must be provided")
+            
+            # Validate percentages sum to 1.0 (allow small floating point errors)
+            total = (custom_protein or 0) + (custom_carb or 0) + (custom_fat or 0)
+            if abs(total - 1.0) > 0.01:
+                raise ValueError(f"Macro percentages must sum to 1.0, got {total}")
+            
+            data['protein_percent'] = custom_protein
+            data['carb_percent'] = custom_carb
+            data['fat_percent'] = custom_fat
+        else:
+            # Set percentages based on diet type
+            if diet_type == "high-protein":
+                data['protein_percent'] = 0.30
+                data['carb_percent'] = 0.40
+                data['fat_percent'] = 0.30
+            elif diet_type == "low-carb":
+                data['protein_percent'] = 0.25
+                data['carb_percent'] = 0.20
+                data['fat_percent'] = 0.55
+            elif diet_type == "keto":
+                data['protein_percent'] = 0.20
+                data['carb_percent'] = 0.05
+                data['fat_percent'] = 0.75
+            elif diet_type == "custom":
+                raise ValueError("For custom diet type, macro percentages must be provided")
+            else:  # balanced, vegetarian, vegan
+                data['protein_percent'] = 0.20
+                data['carb_percent'] = 0.50
+                data['fat_percent'] = 0.30
+        
+        # Calculate macro targets if daily_calories is provided
+        if daily_calories and daily_calories > 0:
+            data['protein_target'] = daily_calories * data['protein_percent'] / 4  # 4 cal/g protein
+            data['carb_target'] = daily_calories * data['carb_percent'] / 4       # 4 cal/g carbs
+            data['fat_target'] = daily_calories * data['fat_percent'] / 9         # 9 cal/g fat
+        
+        # Call parent init
+        super().__init__(**data)
 
 
 class UserProfile(BaseModel):
@@ -87,37 +149,6 @@ class MealPreferences(BaseModel):
     ingredients_to_avoid: Optional[List[str]] = Field(None, description="Specific ingredients to avoid (beyond dietary restrictions)")
 
 
-# class MealPlanResponse(BaseModel):
-#     """Structured response for meal plan generation."""
-#     breakfast: List[MealItem] = Field(default_factory=list)
-#     lunch: List[MealItem] = Field(default_factory=list)
-#     dinner: List[MealItem] = Field(default_factory=list)
-#     snacks: List[MealItem] = Field(default_factory=list)
-
-
-# class MealSuggestionOptions(BaseModel):
-#     """Structured response for meal suggestions with three options."""
-#     option_1: MealSuggestion
-#     option_2: MealSuggestion  
-#     option_3: MealSuggestion
-
-
-# class ConversationContext(BaseModel):
-#     """Tracks conversation state and memory."""
-#     # Planning phase tracking
-#     planning_phase: Literal["gathering_info", "setting_goals", "building_meals", "optimizing", "complete"] = Field(
-#         "gathering_info",
-#         description="Current phase of meal planning"
-#     )
-
-#     # User preferences mentioned in conversation
-#     mentioned_preferences: Dict[str, Any] = Field(
-#         default_factory=dict,
-#         description="Preferences mentioned during conversation"
-#     )
-
-
-
 # ========== State Definition ==========
 
 class MealPlannerState(BaseModel):
@@ -135,111 +166,106 @@ class MealPlannerState(BaseModel):
 
     # User information
     user_profile: UserProfile = Field(default_factory=UserProfile)
-#     nutrition_goals: Optional[NutritionGoals] = None
+    nutrition_goals: Optional[NutritionGoals] = None
 
-#     # Enhanced conversation tracking
-#     conversation_context: ConversationContext = Field(default_factory=ConversationContext)
+    # Current meal being edited (for context)
+    current_meal: Literal["breakfast", "lunch", "dinner", "snacks"] = "breakfast"
 
-#     # Current meal being edited (for context)
-#     current_meal: Literal["breakfast", "lunch", "dinner", "snacks"] = "breakfast"
 
-#     # Running nutrition totals - now computed automatically
-#     # current_totals: Optional[NutritionInfo] = None
+    def _parse_amount(self, amount_str: str) -> float:
+        """Parse amount string to float, handling fractions like '1/2', '1 1/2'."""
+        amount_str = amount_str.strip()
+        
+        # Handle mixed numbers like "1 1/2"
+        mixed_match = re.match(r'^(\d+)\s+(\d+)/(\d+)$', amount_str)
+        if mixed_match:
+            whole, num, den = mixed_match.groups()
+            return float(whole) + float(num) / float(den)
+        
+        # Handle simple fractions like "1/2"
+        if '/' in amount_str:
+            try:
+                return float(Fraction(amount_str))
+            except ValueError:
+                pass
+        
+        # Handle decimals and whole numbers
+        try:
+            return float(amount_str)
+        except ValueError:
+            # Default to 1 if we can't parse
+            return 1.0
 
-#     def _parse_amount(self, amount_str: str) -> float:
-#         """Parse amount string to float, handling fractions like '1/2', '1 1/2'."""
-#         amount_str = amount_str.strip()
-        
-#         # Handle mixed numbers like "1 1/2"
-#         mixed_match = re.match(r'^(\d+)\s+(\d+)/(\d+)$', amount_str)
-#         if mixed_match:
-#             whole, num, den = mixed_match.groups()
-#             return float(whole) + float(num) / float(den)
-        
-#         # Handle simple fractions like "1/2"
-#         if '/' in amount_str:
-#             try:
-#                 return float(Fraction(amount_str))
-#             except ValueError:
-#                 pass
-        
-#         # Handle decimals and whole numbers
-#         try:
-#             return float(amount_str)
-#         except ValueError:
-#             # Default to 1 if we can't parse
-#             return 1.0
+    def _get_food_database(self) -> Dict[str, 'FoodItem']:
+        """Get the food database. Import here to avoid circular imports."""
+        try:
+            from .food_database import get_food_database
+            return get_food_database()
+        except ImportError:
+            return {}
 
-#     def _get_food_database(self) -> Dict[str, 'FoodItem']:
-#         """Get the food database. Import here to avoid circular imports."""
-#         try:
-#             from .food_database import get_food_database
-#             return get_food_database()
-#         except ImportError:
-#             return {}
+    def _calculate_item_nutrition(self, item: MealItem, food_db: Dict[str, 'FoodItem']) -> NutritionInfo:
+        """Calculate nutrition for a single meal item using the food database."""
+        # Try to find exact match first
+        food_item = None
+        food_key = item.food.lower().replace(' ', '_')
+        
+        # Look for exact match by ID
+        if food_key in food_db:
+            food_item = food_db[food_key]
+        else:
+            # Look for name match
+            for fid, fitem in food_db.items():
+                if fitem.name.lower() == item.food.lower():
+                    food_item = fitem
+                    break
+        
+        if not food_item:
+            # If not found in database, return zero nutrition
+            # In a real app, you might want to log this or use LLM as fallback
+            return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
+        
+        # Parse the amount
+        multiplier = self._parse_amount(item.amount)
+        
+        # Calculate nutrition based on the multiplier
+        return NutritionInfo(
+            calories=food_item.calories * multiplier,
+            protein=food_item.protein * multiplier,
+            carbohydrates=food_item.carbohydrates * multiplier,
+            fat=food_item.fat * multiplier
+        )
 
-#     def _calculate_item_nutrition(self, item: MealItem, food_db: Dict[str, 'FoodItem']) -> NutritionInfo:
-#         """Calculate nutrition for a single meal item using the food database."""
-#         # Try to find exact match first
-#         food_item = None
-#         food_key = item.food.lower().replace(' ', '_')
+    def calculate_nutrition_totals(self) -> NutritionInfo:
+        """Calculate total nutrition from all meals using the food database."""
+        food_db = self._get_food_database()
         
-#         # Look for exact match by ID
-#         if food_key in food_db:
-#             food_item = food_db[food_key]
-#         else:
-#             # Look for name match
-#             for fid, fitem in food_db.items():
-#                 if fitem.name.lower() == item.food.lower():
-#                     food_item = fitem
-#                     break
+        total = NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
         
-#         if not food_item:
-#             # If not found in database, return zero nutrition
-#             # In a real app, you might want to log this or use LLM as fallback
-#             return NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
+        # Sum up all meals
+        for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
+            meal_items = getattr(self, meal_type, [])
+            for item in meal_items:
+                item_nutrition = self._calculate_item_nutrition(item, food_db)
+                total.calories += item_nutrition.calories
+                total.protein += item_nutrition.protein
+                total.carbohydrates += item_nutrition.carbohydrates
+                total.fat += item_nutrition.fat
         
-#         # Parse the amount
-#         multiplier = self._parse_amount(item.amount)
-        
-#         # Calculate nutrition based on the multiplier
-#         return NutritionInfo(
-#             calories=food_item.calories * multiplier,
-#             protein=food_item.protein * multiplier,
-#             carbohydrates=food_item.carbohydrates * multiplier,
-#             fat=food_item.fat * multiplier
-#         )
+        return total
 
-#     def calculate_nutrition_totals(self) -> NutritionInfo:
-#         """Calculate total nutrition from all meals using the food database."""
-#         food_db = self._get_food_database()
-        
-#         total = NutritionInfo(calories=0, protein=0, carbohydrates=0, fat=0)
-        
-#         # Sum up all meals
-#         for meal_type in ["breakfast", "lunch", "dinner", "snacks"]:
-#             meal_items = getattr(self, meal_type, [])
-#             for item in meal_items:
-#                 item_nutrition = self._calculate_item_nutrition(item, food_db)
-#                 total.calories += item_nutrition.calories
-#                 total.protein += item_nutrition.protein
-#                 total.carbohydrates += item_nutrition.carbohydrates
-#                 total.fat += item_nutrition.fat
-        
-#         return total
+    @computed_field
+    @property
+    def current_totals(self) -> NutritionInfo:
+        """Automatically calculated nutrition totals (computed field)."""
+        return self.calculate_nutrition_totals()
 
-#     @computed_field
-#     @property
-#     def current_totals(self) -> NutritionInfo:
-#         """Automatically calculated nutrition totals (computed field)."""
-#         return self.calculate_nutrition_totals()
-
-#     @computed_field
-#     @property
-#     def nutrition_summary(self) -> str:
-#         """Formatted nutrition summary for display."""
-#         totals = self.current_totals
-#         return f"Calories: {totals.calories:.0f}, Protein: {totals.protein:.0f}g, Carbs: {totals.carbohydrates:.0f}g, Fat: {totals.fat:.0f}g"
+    @computed_field
+    @property
+    def nutrition_summary(self) -> str:
+        """Formatted nutrition summary for display."""
+        totals = self.current_totals
+        return f"Calories: {totals.calories:.0f}, Protein: {totals.protein:.0f}g, Carbs: {totals.carbohydrates:.0f}g, Fat: {totals.fat:.0f}g"
 
 #     @computed_field
 #     @property
@@ -269,14 +295,14 @@ class MealPlannerState(BaseModel):
         
 #         return context
 
-#     @computed_field
-#     @property
-#     def has_sufficient_nutrition(self) -> bool:
-#         """Check if current nutrition meets minimum goals (within 10% of calorie target)."""
-#         if not self.nutrition_goals:
-#             return False
+    # @computed_field
+    # @property
+    # def has_sufficient_nutrition(self) -> bool:
+    #     """Check if current nutrition meets minimum goals (within 10% of calorie target)."""
+    #     if not self.nutrition_goals:
+    #         return False
         
-#         totals = self.current_totals
-#         goals = self.nutrition_goals
-#         calorie_percent = totals.calories / goals.daily_calories
-#         return 0.9 <= calorie_percent <= 1.1
+    #     totals = self.current_totals
+    #     goals = self.nutrition_goals
+    #     calorie_percent = totals.calories / goals.daily_calories
+    #     return 0.9 <= calorie_percent <= 1.1

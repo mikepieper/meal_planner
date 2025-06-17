@@ -1,4 +1,5 @@
-from src.models import MealPlannerState
+from src.models import MealPlannerState, MEAL_TYPES
+from typing import List
 
 
 def view_current_meal_plan(state: MealPlannerState) -> str:
@@ -76,3 +77,28 @@ def get_daily_nutrition_summary(state: MealPlannerState) -> str:
 
     return result
     
+
+# === Tool Context ===
+def get_user_profile_context(state: MealPlannerState) -> str:
+    """Get user profile context."""
+    user_profile = state.user_profile
+    context = ""
+    if user_profile.dietary_restrictions:
+        context += get_dietary_restrictions_context(state)
+    if user_profile.preferred_cuisines:
+        context += f"Preferred cuisines: {', '.join(user_profile.preferred_cuisines)}\n"
+    if user_profile.cooking_time_preference:
+        context += f"Cooking time preference: {user_profile.cooking_time_preference}\n"
+    if user_profile.health_goals:
+        context += f"Health goals: {', '.join(user_profile.health_goals)}\n"
+    return context
+
+
+def get_dietary_restrictions_context(state: MealPlannerState) -> str:
+    """Add dietary restrictions warning to context."""
+    context = ""
+    if dietary_restrictions := state.user_profile.dietary_restrictions:
+        context += f"Dietary restrictions: {', '.join(dietary_restrictions)}\n"
+        context += f"⚠️ CRITICAL: You MUST NOT include ANY foods that violate these restrictions!\n"
+        context += "This is extremely important - double-check every single item.\n\n"
+    return context

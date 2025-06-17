@@ -5,8 +5,7 @@ from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
 
-from src.models import MealPlannerState
-from src.constants import MEAL_TYPES
+from src.models import MealPlannerState, MEAL_TYPES
 
 # Initialize LLM for generation tools
 llm = ChatOpenAI(model="gpt-4o", temperature=0.7)

@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from src.models import MealItem
 from src.models import MealPlannerState
 
+
 def update_meal_with_items(
     meal_type: str,
     new_items: List[MealItem], 
@@ -23,24 +24,4 @@ def update_meal_with_items(
         "current_meal": meal_type,
     }
 
-# def update_planning_phase(state: MealPlannerState, context) -> Any:
-#     """Update planning phase based on current state."""
-#     new_context = context.model_copy()
-    
-#     if new_context.planning_phase == "gathering_info" and state.nutrition_goals:
-#         new_context.planning_phase = "building_meals"
-#     elif new_context.planning_phase == "setting_goals":
-#         new_context.planning_phase = "building_meals"
-#     elif new_context.planning_phase == "building_meals" and state.has_sufficient_nutrition:
-#         new_context.planning_phase = "optimizing"
-#     elif new_context.planning_phase == "optimizing" and state.has_sufficient_nutrition:
-#         new_context.planning_phase = "complete"
-    
-#     # Special case for when meals already exist
-#     meals_with_items = sum(1 for meal in MEAL_TYPES if getattr(state, meal))
-#     if meals_with_items > 0 and new_context.planning_phase == "setting_goals":
-#         new_context.planning_phase = "building_meals"
-#         if meals_with_items >= 2:
-#             new_context.planning_phase = "optimizing"
-    
-#     return new_context
+
