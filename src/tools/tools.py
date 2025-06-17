@@ -125,7 +125,7 @@ def set_nutrition_goals(
     - set_nutrition_goals(daily_calories=2500)  # Update calories only
     """
     # Get existing goals if any
-    current_goals = state.get("nutrition_goals")
+    current_goals = state.nutrition_goals
     
     # Prepare data for creating/updating goals
     goal_data = {}
@@ -206,7 +206,7 @@ def suggest_foods_to_meet_goals(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
     focus_area: Optional[str] = None
-) -> str:
+) -> Command:
     """Suggest specific foods with portions based on dietary preferences and optional focus areas.
     
     Provides 5-7 specific food recommendations that respect dietary restrictions
@@ -241,7 +241,18 @@ Provide 5-7 specific food suggestions with realisticportions.
 Focus on variety and practical options that align with any stated preferences."""
 
     response = llm.invoke(prompt)
-    return f"**Food suggestions{f' for {focus_area}' if focus_area else ''}:**\n\n{response.content}"
+    content = f"**Food suggestions{f' for {focus_area}' if focus_area else ''}:**\n\n{response.content}"
+    
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )
 
 @tool
 def generate_meal_plan(
@@ -249,7 +260,7 @@ def generate_meal_plan(
     tool_call_id: Annotated[str, InjectedToolCallId],
     meal_types: Optional[Union[List[MealType], Literal["all"]]] = None,
     preferences: Optional[MealPreferences] = None
-) -> str:
+) -> Command:
     """Generate meal plan suggestions for specified meals or auto-detect empty slots.
     
     Flexible tool that can generate suggestions for:
@@ -293,7 +304,16 @@ def generate_meal_plan(
                 meals_to_generate.append(meal)
         
         if not meals_to_generate:
-            return "All meals are already planned! Your meal plan is complete."
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content="All meals are already planned! Your meal plan is complete.",
+                            tool_call_id=tool_call_id
+                        )
+                    ]
+                }
+            )
     elif meal_types == "all":
         # Generate all meals
         meals_to_generate = MEAL_TYPES
@@ -382,7 +402,16 @@ Format each meal clearly with the meal name followed by items."""
     else:
         result += f"\n\n*To implement these suggestions, I can add the items to your meal plan using the meal planning tools.*"
 
-    return result
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=result,
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )
 
 
 @tool
@@ -393,7 +422,7 @@ def get_meal_suggestions(
     criteria: Optional[str] = None,
     num_suggestions: int = 3,
     preferences: Optional[MealPreferences] = None
-) -> str:
+) -> Command:
     """Generate meal suggestions based on meal type and/or specific criteria.
     
     Flexible tool that can handle both specific meal slots and general meal ideas.
@@ -425,7 +454,16 @@ def get_meal_suggestions(
     suggestions from conversation history when the user wants to add items.
     """
     if not meal_type and not criteria:
-        return "Please specify either a meal type (breakfast/lunch/dinner/snacks) or criteria for suggestions."
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content="Please specify either a meal type (breakfast/lunch/dinner/snacks) or criteria for suggestions.",
+                        tool_call_id=tool_call_id
+                    )
+                ]
+            }
+        )
     
     user_profile = state.user_profile
     num_suggestions = min(num_suggestions, 10)  # Cap at 10 suggestions
@@ -450,7 +488,7 @@ def get_meal_suggestions(
             context += "Focus on nutrient-dense, lower-calorie options\n\n"
     
     # Add dietary restrictions
-    context = add_dietary_restrictions_context(context, user_profile.dietary_restrictions, 
+    context = get_dietary_restrictions_context(context, user_profile.dietary_restrictions, 
                                              "Only suggest foods that STRICTLY comply with")
     
     # Add preferences if provided
@@ -497,4 +535,15 @@ Format each suggestion clearly with a number or name."""
     else:
         header = f"**{num_suggestions} meal ideas for '{criteria}':**\n\n"
     
-    return header + response.content
+    content = header + response.content
+    
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )

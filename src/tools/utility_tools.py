@@ -4,6 +4,8 @@ from langchain_core.tools import tool
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
 
 from src.models import MealPlannerState, MEAL_TYPES
 
@@ -15,7 +17,7 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 def generate_shopping_list(
     state: Annotated[MealPlannerState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
+) -> Command:
     """Create a consolidated shopping list from all meals in the current meal plan.
     
     Combines all food items across breakfast, lunch, dinner, and snacks into
@@ -49,14 +51,24 @@ def generate_shopping_list(
             all_items[key].append(f"{item.amount} {item.unit}")
 
     if not all_items:
-        return "No items in meal plan to create shopping list."
+        content = "No items in meal plan to create shopping list."
+    else:
+        # Build shopping list
+        shopping_list = "Shopping List:\n\n"
+        for food, amounts in sorted(all_items.items()):
+            if len(amounts) == 1:
+                shopping_list += f"- {food.capitalize()}: {amounts[0]}\n"
+            else:
+                shopping_list += f"- {food.capitalize()}: {', '.join(amounts)} (total from multiple meals)\n"
+        content = shopping_list
 
-    # Build shopping list
-    shopping_list = "Shopping List:\n\n"
-    for food, amounts in sorted(all_items.items()):
-        if len(amounts) == 1:
-            shopping_list += f"- {food.capitalize()}: {amounts[0]}\n"
-        else:
-            shopping_list += f"- {food.capitalize()}: {', '.join(amounts)} (total from multiple meals)\n"
-
-    return shopping_list
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )
