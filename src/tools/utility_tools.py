@@ -42,7 +42,7 @@ def generate_shopping_list(
 
     # Collect all items from all meals
     for meal_type in MEAL_TYPES:
-        for item in state[meal_type]:
+        for item in getattr(state,meal_type):
             key = item.food.lower()
             if key not in all_items:
                 all_items[key] = []

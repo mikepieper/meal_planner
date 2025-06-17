@@ -23,7 +23,7 @@ def view_current_meal_plan(state: MealPlannerState) -> str:
     result = "Current Meal Plan:\n\n"
 
     for meal_type in MEAL_TYPES:
-        items = state[meal_type]
+        items = getattr(state,meal_type)
         if items:
             result += f"**{meal_type.capitalize()}:**\n"
             for item in items:

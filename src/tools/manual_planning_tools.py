@@ -45,15 +45,15 @@ def add_meal_item(
     # Use helper to handle common meal update logic
     updates = update_meal_with_items(meal_type, [new_item], state)
     
-    return Command(
-        update=updates,
-        messages=[
-            ToolMessage(
-                content=f"Successfully added {new_item.food} to {meal_type}",
-                tool_call_id=tool_call_id
-            )
-        ]
-    )
+    # Add the message to the updates
+    updates["messages"] = [
+        ToolMessage(
+            content=f"Successfully added {new_item.food} to {meal_type}",
+            tool_call_id=tool_call_id
+        )
+    ]
+    
+    return Command(update=updates)
 
 
 @tool
@@ -92,15 +92,16 @@ def add_multiple_items(
     # Use helper to handle common meal update logic
     updates = update_meal_with_items(meal_type, new_items, state)
     meal_names = ", ".join([item.food for item in new_items])
-    return Command(
-        update=updates,
-        messages=[
-            ToolMessage(
-                content=f"Successfully added {meal_names} items to {meal_type}",
-                tool_call_id=tool_call_id
-            )
-        ]
-    )
+    
+    # Add the message to the updates
+    updates["messages"] = [
+        ToolMessage(
+            content=f"Successfully added {meal_names} items to {meal_type}",
+            tool_call_id=tool_call_id
+        )
+    ]
+    
+    return Command(update=updates)
 
 
 @tool
@@ -130,7 +131,7 @@ def remove_meal_item(
     
     if meal_type:
         # Remove from specific meal only
-        meal_list = state[meal_type]
+        meal_list = getattr(state, meal_type)
         updated_meal = []
         found = False
         
@@ -147,7 +148,7 @@ def remove_meal_item(
     else:
         # Remove from all meals that contain the item
         for meal in MEAL_TYPES:
-            meal_list = state[meal]
+            meal_list = getattr(state, meal)
             updated_meal = []
             found = False
             
@@ -163,12 +164,16 @@ def remove_meal_item(
 
     if not removed_from:
         meal_context = f"in {meal_type}" if meal_type else "in any meal"
-        return Command(update={}, messages=[
-            ToolMessage(
-                content=f"Food item '{food}' not found {meal_context}",
-                tool_call_id=tool_call_id
-            )
-        ])
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=f"Food item '{food}' not found {meal_context}",
+                        tool_call_id=tool_call_id
+                    )
+                ]
+            }
+        )
 
     # Create success message
     if len(removed_from) == 1:
@@ -177,15 +182,15 @@ def remove_meal_item(
         meals_list = ", ".join(removed_from)
         message = f"Successfully removed '{food}' from {meals_list}"
 
-    return Command(
-        update=updates,
-        messages=[
-            ToolMessage(
-                content=message,
-                tool_call_id=tool_call_id
-            )
-        ]
-    )
+    # Add the message to the updates
+    updates["messages"] = [
+        ToolMessage(
+            content=message,
+            tool_call_id=tool_call_id
+        )
+    ]
+    
+    return Command(update=updates)
 
 
 @tool
@@ -211,14 +216,14 @@ def clear_meal(
     return Command(
         update={
             meal_type: [],
-            "current_meal": meal_type
-        },
-        messages=[
-            ToolMessage(
-                content=f"Successfully cleared {meal_type}",
-                tool_call_id=tool_call_id
-            )
-        ]
+            "current_meal": meal_type,
+            "messages": [
+                ToolMessage(
+                    content=f"Successfully cleared {meal_type}",
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
     )
 
 
@@ -246,13 +251,13 @@ def clear_all_meals(
     for meal_type in MEAL_TYPES:
         updates[meal_type] = []
     
-    return Command(
-        update=updates,
-        messages=[
-            ToolMessage(
-                content=f"Successfully cleared all meals",
-                tool_call_id=tool_call_id
-            )
-        ]
-    )
+    # Add the message to the updates
+    updates["messages"] = [
+        ToolMessage(
+            content="Successfully cleared all meals",
+            tool_call_id=tool_call_id
+        )
+    ]
+    
+    return Command(update=updates)
 

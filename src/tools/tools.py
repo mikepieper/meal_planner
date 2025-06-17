@@ -44,21 +44,44 @@ def update_user_profile(
     
     Use this early in conversations to establish preferences that guide all meal planning.
     """
-    profile = state["user_profile"]
+    profile = state.user_profile
     new_profile = profile.model_copy()
+
+    # Track what was updated
+    updated_fields = []
 
     # Update only provided fields
     if dietary_restrictions is not None:
         new_profile.dietary_restrictions = dietary_restrictions
+        updated_fields.append(f"dietary restrictions: {', '.join(dietary_restrictions) if dietary_restrictions else 'none'}")
     if preferred_cuisines is not None:
         new_profile.preferred_cuisines = preferred_cuisines
+        updated_fields.append(f"preferred cuisines: {', '.join(preferred_cuisines) if preferred_cuisines else 'none'}")
     if cooking_time_preference is not None:
         new_profile.cooking_time_preference = cooking_time_preference
+        updated_fields.append(f"cooking time preference: {cooking_time_preference}")
     if health_goals is not None:
         new_profile.health_goals = health_goals
+        updated_fields.append(f"health goals: {', '.join(health_goals) if health_goals else 'none'}")
 
 
-    return Command(update={"user_profile": new_profile}) # No message since silent tool
+    # Create a descriptive message about what was updated
+    if updated_fields:
+        message = f"Successfully updated user profile - {'; '.join(updated_fields)}"
+    else:
+        message = "No changes made to user profile"
+
+    return Command(
+        update={
+            "user_profile": new_profile,
+            "messages": [
+                ToolMessage(
+                    content=message,
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )
 
 
 # === NUTRITION TOOLS ===

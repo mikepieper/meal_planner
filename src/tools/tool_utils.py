@@ -13,7 +13,7 @@ def update_meal_with_items(
     Returns the update dictionary for a Command.
     """
     # Add all items to the meal
-    updated_meal = state[meal_type] + new_items
+    updated_meal = getattr(state,meal_type) + new_items
 
     # Update planning phase if appropriate - use temporary state to check transitions
     temp_state = state.model_copy()
