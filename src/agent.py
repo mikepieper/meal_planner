@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import SystemMessage
 
 from src.agent_prompt import AGENT_PROMPT
 from src.context_functions import get_daily_nutrition_summary

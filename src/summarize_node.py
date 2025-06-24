@@ -6,6 +6,9 @@ from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(model="gpt-4o", temperature=0) 
 
+# Configuration: Set to False if frontend doesn't support RemoveMessage
+USE_REMOVE_MESSAGE = False  # Set to True when LangGraph Studio supports RemoveMessage
+
 
 def should_summarize_conversation(state: MealPlannerState) -> bool:
     """Determine whether the conversation should be summarized.
@@ -97,15 +100,28 @@ def summarize_conversation(state: MealPlannerState) -> dict:
     # Get summary from LLM (using base model without tools)
     response = llm.invoke(summarization_messages)
     
-    # Keep more recent messages - be less aggressive about deletion
-    # Keep last 6 messages instead of 4 to maintain better context
-    messages_to_keep = 6
-    if len(messages) > messages_to_keep:
-        delete_messages = [RemoveMessage(id=m.id) for m in messages[:-messages_to_keep]]
+    # Handle message history management based on frontend support
+    if USE_REMOVE_MESSAGE:
+        # Use RemoveMessage when frontend supports it (more efficient)
+        messages_to_keep = 6
+        if len(messages) > messages_to_keep:
+            delete_messages = [RemoveMessage(id=m.id) for m in messages[:-messages_to_keep]]
+        else:
+            delete_messages = []
+        
+        return {
+            "summary": response.content,
+            "messages": delete_messages
+        }
     else:
-        delete_messages = []
-    
-    return {
-        "summary": response.content,
-        "messages": delete_messages
-    }
+        # Fallback: Keep only recent messages (when RemoveMessage not supported)
+        messages_to_keep = 6
+        if len(messages) > messages_to_keep:
+            recent_messages = messages[-messages_to_keep:]
+        else:
+            recent_messages = messages
+        
+        return {
+            "summary": response.content,
+            "messages": recent_messages  # Replace entire message list with recent ones
+        }
