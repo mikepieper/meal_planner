@@ -19,6 +19,8 @@ from src.context_functions import view_current_meal_plan
 from src.tools.tools import (
     update_user_profile,
     set_nutrition_goals,
+)
+from src.tools.suggestion_tools import (
     suggest_foods_to_meet_goals,
     generate_meal_plan,
     get_meal_suggestions,
@@ -77,6 +79,13 @@ def agent_node(state: MealPlannerState) -> dict:
     # Get agent response
     result = llm_with_tools.invoke(llm_messages)
 
+    # Check if the last tool call was a suggestion tool
+    if result.tool_calls:
+        last_tool = result.tool_calls[-1]["name"]
+        if last_tool in ["generate_meal_plan", "get_meal_suggestions", "suggest_foods_to_meet_goals"]:
+            # Add a user-facing message after the tool response
+            result.content = "I've provided some suggestions above. Would you like me to add any of these to your meal plan?"
+    
     return {"messages": [result]}
 
 
