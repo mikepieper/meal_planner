@@ -7,7 +7,7 @@ from langchain_core.tools.base import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, AIMessage
 
 from src.models import MealPlannerState, MealItem, MEAL_TYPES, MealType
 from src.tools.tool_utils import update_meal_with_items
@@ -50,15 +50,13 @@ def add_meal_item(
     updated_state = state.model_copy(update=updates)
     meal_plan_display = get_meal_plan_display(updated_state)
     
-    # Combine success message with meal plan
-    success_message = f"Successfully added {new_item.food} to {meal_type}.\n\n{meal_plan_display}"
+    # Create user-friendly message
+    success_message = f"Great! I've added {amount} {unit} of {food} to your {meal_type}.\n\n{meal_plan_display}"
     
-    # Add the message to the updates
+    # Return both ToolMessage and AIMessage so user sees the result immediately
     updates["messages"] = [
-        ToolMessage(
-            content=success_message,
-            tool_call_id=tool_call_id
-        )
+        ToolMessage(content="Item added successfully", tool_call_id=tool_call_id),
+        AIMessage(content=success_message)
     ]
     
     return Command(update=updates)
@@ -105,14 +103,12 @@ def add_multiple_items(
     meal_plan_display = get_meal_plan_display(updated_state)
     
     meal_names = ", ".join([item.food for item in new_items])
-    success_message = f"Successfully added {len(new_items)} items to {meal_type}: {meal_names}.\n\n{meal_plan_display}"
+    success_message = f"Perfect! I've added {len(new_items)} items to your {meal_type}: {meal_names}.\n\n{meal_plan_display}"
     
-    # Add the message to the updates
+    # Return both ToolMessage and AIMessage so user sees the result immediately
     updates["messages"] = [
-        ToolMessage(
-            content=success_message,
-            tool_call_id=tool_call_id
-        )
+        ToolMessage(content="Items added successfully", tool_call_id=tool_call_id),
+        AIMessage(content=success_message)
     ]
     
     return Command(update=updates)
@@ -178,13 +174,12 @@ def remove_meal_item(
 
     if not removed_from:
         meal_context = f"in {meal_type}" if meal_type else "in any meal"
+        error_message = f"I couldn't find '{food}' {meal_context} to remove."
         return Command(
             update={
                 "messages": [
-                    ToolMessage(
-                        content=f"Food item '{food}' not found {meal_context}",
-                        tool_call_id=tool_call_id
-                    )
+                    ToolMessage(content="Item not found", tool_call_id=tool_call_id),
+                    AIMessage(content=error_message)
                 ]
             }
         )
@@ -195,17 +190,15 @@ def remove_meal_item(
 
     # Create success message
     if len(removed_from) == 1:
-        success_message = f"Successfully removed '{food}' from {removed_from[0]}.\n\n{meal_plan_display}"
+        success_message = f"Done! I've removed '{food}' from your {removed_from[0]}.\n\n{meal_plan_display}"
     else:
         meals_list = ", ".join(removed_from)
-        success_message = f"Successfully removed '{food}' from {meals_list}.\n\n{meal_plan_display}"
+        success_message = f"Done! I've removed '{food}' from {meals_list}.\n\n{meal_plan_display}"
 
-    # Add the message to the updates
+    # Return both ToolMessage and AIMessage so user sees the result immediately
     updates["messages"] = [
-        ToolMessage(
-            content=success_message,
-            tool_call_id=tool_call_id
-        )
+        ToolMessage(content="Item removed successfully", tool_call_id=tool_call_id),
+        AIMessage(content=success_message)
     ]
     
     return Command(update=updates)
@@ -240,13 +233,12 @@ def clear_meal(
     updated_state = state.model_copy(update=updates)
     meal_plan_display = get_meal_plan_display(updated_state)
     
-    success_message = f"Successfully cleared {meal_type}.\n\n{meal_plan_display}"
+    success_message = f"All cleared! I've removed all items from your {meal_type}.\n\n{meal_plan_display}"
     
+    # Return both ToolMessage and AIMessage so user sees the result immediately
     updates["messages"] = [
-        ToolMessage(
-            content=success_message,
-            tool_call_id=tool_call_id
-        )
+        ToolMessage(content="Meal cleared successfully", tool_call_id=tool_call_id),
+        AIMessage(content=success_message)
     ]
     
     return Command(update=updates)
@@ -280,14 +272,12 @@ def clear_all_meals(
     updated_state = state.model_copy(update=updates)
     meal_plan_display = get_meal_plan_display(updated_state)
     
-    success_message = f"Successfully cleared all meals.\n\n{meal_plan_display}"
+    success_message = f"Complete reset! I've cleared all meals from your plan.\n\n{meal_plan_display}"
     
-    # Add the message to the updates
+    # Return both ToolMessage and AIMessage so user sees the result immediately
     updates["messages"] = [
-        ToolMessage(
-            content=success_message,
-            tool_call_id=tool_call_id
-        )
+        ToolMessage(content="All meals cleared successfully", tool_call_id=tool_call_id),
+        AIMessage(content=success_message)
     ]
     
     return Command(update=updates)

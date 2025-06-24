@@ -78,11 +78,11 @@ def agent_node(state: MealPlannerState) -> dict:
     # Get agent response
     result = llm_with_tools.invoke(llm_messages)
 
-    # Check if the last tool call was a suggestion tool
+    # Handle suggestion tools - add follow-up message for user approval
     if result.tool_calls:
         last_tool = result.tool_calls[-1]["name"]
         if last_tool in ["generate_meal_plan", "get_meal_suggestions", "suggest_foods_to_meet_goals"]:
-            # Add a user-facing message after the tool response
+            # Add a user-facing message after the tool response for suggestion tools
             result.content = "I've provided some suggestions above. Would you like me to add any of these to your meal plan?"
     
     return {"messages": [result]}
