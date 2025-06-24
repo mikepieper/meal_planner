@@ -1,8 +1,17 @@
 from src.models import MealPlannerState, MEAL_TYPES
-from typing import List
+from typing import List, Annotated
 
+from langchain_core.tools import tool
+from langchain_core.tools.base import InjectedToolCallId
+from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
 
-def view_current_meal_plan(state: MealPlannerState) -> str:
+@tool
+def view_current_meal_plan(
+    state: Annotated[MealPlannerState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
     """Display a comprehensive overview of the current meal plan.
     
     Shows all meals (breakfast, lunch, dinner, snacks) with their items and portions,
@@ -13,17 +22,13 @@ def view_current_meal_plan(state: MealPlannerState) -> str:
     - Checking progress toward nutrition goals
     - Identifying empty meals that need to be filled
     
-    Returns a formatted string with:
-    - All meal items with portions
-    - Daily nutrition totals (calories, protein, carbs, fat)
-    - Goal progress percentages if nutrition goals are set
-    
-    Use this tool before making meal planning decisions to understand the current state.
+    Use this tool when users ask to see their current meal plan or when they want
+    to review what's currently planned before making changes.
     """
-    result = "Current Meal Plan:\n\n"
+    result = "**Current Meal Plan:**\n\n"
 
     for meal_type in MEAL_TYPES:
-        items = getattr(state,meal_type)
+        items = getattr(state, meal_type)
         if items:
             result += f"**{meal_type.capitalize()}:**\n"
             for item in items:
@@ -33,7 +38,49 @@ def view_current_meal_plan(state: MealPlannerState) -> str:
             result += f"**{meal_type.capitalize()}:** Empty\n\n"
 
     # Add current nutrition totals
-    result += f"\n**Current Daily Totals:**\n- {state.nutrition_summary}\n"
+    result += f"**Current Daily Totals:**\n- {state.nutrition_summary}\n"
+
+    # Compare to goals if set
+    if state.nutrition_goals:
+        goals = state.nutrition_goals
+        totals = state.current_totals
+        result += "\n**Progress to Goals:**\n"
+        calories_percent = (totals.calories/goals.daily_calories*100)
+        protein_percent = (totals.protein/goals.protein_target*100)
+        result += f"- Calories: {totals.calories:.0f} / {goals.daily_calories} ({calories_percent:.0f}%)\n"
+        result += f"- Protein: {totals.protein:.0f}g / {goals.protein_target:.0f}g ({protein_percent:.0f}%)\n"
+
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=result.strip(),
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )
+
+def get_meal_plan_display(state: MealPlannerState) -> str:
+    """Helper function to get meal plan display without tool call overhead.
+    
+    Use this when you need the meal plan content as a string for inclusion
+    in other tool responses (like after modifications).
+    """
+    result = "**Updated Meal Plan:**\n\n"
+
+    for meal_type in MEAL_TYPES:
+        items = getattr(state, meal_type)
+        if items:
+            result += f"**{meal_type.capitalize()}:**\n"
+            for item in items:
+                result += f"  - {item.amount} {item.unit} of {item.food}\n"
+            result += "\n"
+        else:
+            result += f"**{meal_type.capitalize()}:** Empty\n\n"
+
+    # Add current nutrition totals
+    result += f"**Current Daily Totals:**\n- {state.nutrition_summary}\n"
 
     # Compare to goals if set
     if state.nutrition_goals:

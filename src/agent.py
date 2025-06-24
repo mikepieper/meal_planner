@@ -6,7 +6,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
 from src.agent_prompt import AGENT_PROMPT
 from src.context_functions import get_daily_nutrition_summary
 from src.models import MealPlannerState
-from src.summarize_node import summarize_conversation, should_summarize
+from src.summarize_node import summarize_conversation, should_summarize_conversation
 # Tool Imports
 from src.tools.manual_planning_tools import (
     add_meal_item,
@@ -72,7 +72,6 @@ def agent_node(state: MealPlannerState) -> dict:
         content = get_daily_nutrition_summary(state)
         llm_messages.append(SystemMessage(content=content))
 
-
     # Add conversation history (limit to recent 10 messages to avoid token issues)
     llm_messages.extend([msg for msg in messages[-10:] if not isinstance(msg, SystemMessage)])
 
@@ -87,6 +86,23 @@ def agent_node(state: MealPlannerState) -> dict:
             result.content = "I've provided some suggestions above. Would you like me to add any of these to your meal plan?"
     
     return {"messages": [result]}
+
+
+def route_after_agent(state: MealPlannerState) -> str:
+    """Route after agent response - prioritize tools, then check for summarization."""
+    messages = state.messages
+    last_message = messages[-1] if messages else None
+    
+    # First priority: if there are tool calls, handle them
+    if last_message and hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+        return "tools"
+    
+    # Second priority: check if we should summarize (but only if no tools)
+    if should_summarize_conversation(state):
+        return "summarize"
+    
+    # Otherwise, end the conversation turn
+    return END
 
 
 def build_graph():
@@ -106,7 +122,7 @@ def build_graph():
     # Conditional routing from agent
     workflow.add_conditional_edges(
         "agent",
-        should_summarize,
+        route_after_agent,
         {
             "tools": "tools",
             "summarize": "summarize", 
@@ -116,7 +132,7 @@ def build_graph():
     
     # Tools always go back to agent
     workflow.add_edge("tools", "agent")
-    # After summarization, continue the conversation
+    # After summarization, go back to agent to continue
     workflow.add_edge("summarize", "agent")
 
     return workflow.compile()

@@ -7,39 +7,58 @@ from langchain_openai import ChatOpenAI
 llm = ChatOpenAI(model="gpt-4o", temperature=0) 
 
 
-def should_summarize(state: MealPlannerState) -> str:
-    """Determine whether to summarize the conversation or run tools.
+def should_summarize_conversation(state: MealPlannerState) -> bool:
+    """Determine whether the conversation should be summarized.
+    
+    This is now separate from tool routing and focuses purely on conversation management.
+    Uses smarter heuristics than just message count.
     
     Args:
         state: The current state of the conversation
         
     Returns:
-        The next node to execute: "tools" if tools are needed, "summarize" if a summary is needed, or END if the conversation is complete
-
-    Example:
-        If the last message is a tool call, return "tools"
-        If the number of non-system messages is greater than 10, return "summarize"
-        Otherwise, return END
+        True if conversation should be summarized, False otherwise
     """
     messages = state.messages
     
-    # First check if we need to call tools (this takes priority)
-    last_message = messages[-1] if messages else None
-    if last_message and hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-        return "tools"
-    
-    # More nuanced message counting with higher threshold
+    # Don't summarize if there are too few messages
     non_system_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+    if len(non_system_messages) < 8:  # Lowered from 10, but still reasonable minimum
+        return False
     
-    # Summarize after 10 messages to allow for longer conversations
-    if len(non_system_messages) > 10:
-        return "summarize"
+    # Always summarize if we have a lot of messages
+    if len(non_system_messages) > 15:  # Hard limit to prevent token overflow
+        return True
     
-    # Otherwise, we're done with this turn
-    return END
+    # Smart heuristics: summarize if we've had substantial back-and-forth
+    # Count user messages (HumanMessage) to gauge conversation depth
+    user_messages = [m for m in messages if isinstance(m, HumanMessage)]
+    
+    # If we've had 4+ user interactions, consider summarizing
+    if len(user_messages) >= 4 and len(non_system_messages) >= 10:
+        return True
+    
+    # Look for conversation phase changes (e.g., moved from setup to planning to adjustments)
+    # This is a simple heuristic - could be made more sophisticated
+    recent_messages = non_system_messages[-6:]  # Look at last 6 messages
+    has_profile_updates = any("profile" in str(m).lower() or "dietary" in str(m).lower() 
+                             for m in recent_messages)
+    has_meal_planning = any("meal" in str(m).lower() or "add" in str(m).lower() 
+                           for m in recent_messages)
+    
+    # If we've covered multiple conversation phases, summarize
+    if has_profile_updates and has_meal_planning and len(non_system_messages) >= 8:
+        return True
+    
+    return False
+
 
 def summarize_conversation(state: MealPlannerState) -> dict:
-    """Summarize the conversation while preserving meal planning context."""
+    """Summarize the conversation while preserving meal planning context.
+    
+    This is now focused purely on passive fact gathering and context preservation,
+    not blocking the main conversation flow.
+    """
     summary = state.summary
     messages = state.messages
     
@@ -49,22 +68,27 @@ def summarize_conversation(state: MealPlannerState) -> dict:
             f"Previous conversation summary: {summary}\n\n"
             "Please extend this summary by incorporating the new messages above. "
             "Focus ONLY on information not captured in the meal plan state:\n"
-            "- Why the user made certain choices (reasoning/context)\n"
-            "- Options they explicitly rejected and why\n"
-            "- Specific brand preferences or cooking methods mentioned\n"
-            "- Timing constraints (e.g., 'need lunch to be portable')\n"
-            "- Any satisfaction/dissatisfaction with suggestions\n"
-            "Do NOT repeat information already in the system like current meals, calories, or dietary restrictions."
+            "- User's reasoning and preferences (why they want certain things)\n"
+            "- Options they explicitly rejected and their reasons\n"
+            "- Specific brand preferences, cooking methods, or timing constraints\n"
+            "- Satisfaction/dissatisfaction with suggestions and feedback\n"
+            "- Context about their lifestyle, schedule, or cooking situation\n"
+            "- Personal anecdotes or background that influences their choices\n\n"
+            "Do NOT repeat information already stored in the system like current meals, "
+            "calorie goals, or dietary restrictions. Keep it concise but capture the 'why' behind decisions."
         )
     else:
         summary_prompt = (
-            "Create a concise summary focusing on context and reasoning. "
-            "Capture ONLY:\n"
-            "- Why the user wants certain things (not just what)\n" 
-            "- Rejected options and reasoning\n"
-            "- Specific preferences about brands, cooking methods, timing\n"
-            "- User's reactions to suggestions\n"
-            "Skip facts already stored (meals planned, calories, restrictions)."
+            "Create a concise summary focusing on context, reasoning, and user preferences. "
+            "Capture ONLY information that provides context for future interactions:\n\n"
+            "- WHY the user wants certain things (not just what they want)\n" 
+            "- Rejected options and their reasoning\n"
+            "- Specific preferences about preparation, brands, timing, etc.\n"
+            "- User's reactions to suggestions and feedback\n"
+            "- Lifestyle context that influences their choices\n"
+            "- Personal background relevant to meal planning\n\n"
+            "Skip facts already stored in the system (current meals, calories, restrictions). "
+            "Focus on the reasoning and context that helps personalize future interactions."
         )
     
     # Add the summarization prompt to messages
@@ -73,8 +97,13 @@ def summarize_conversation(state: MealPlannerState) -> dict:
     # Get summary from LLM (using base model without tools)
     response = llm.invoke(summarization_messages)
     
-    # Keep only the 4 most recent messages (leaving room before next summarization)
-    delete_messages = [RemoveMessage(id=m.id) for m in messages[:-4]]
+    # Keep more recent messages - be less aggressive about deletion
+    # Keep last 6 messages instead of 4 to maintain better context
+    messages_to_keep = 6
+    if len(messages) > messages_to_keep:
+        delete_messages = [RemoveMessage(id=m.id) for m in messages[:-messages_to_keep]]
+    else:
+        delete_messages = []
     
     return {
         "summary": response.content,
