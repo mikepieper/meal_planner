@@ -1,63 +1,40 @@
-# Test Scenarios Configuration
-# Separated global conversation quality vs task-specific meal planning criteria
+# Test Scenarios Configuration - Simplified for Conversation Testing
 
-# Simple scenarios for basic functionality testing
+# Basic functionality testing
 basic_scenarios:
   simple_add_item:
     persona:
       name: "Quick User"
-      age: 30
       communication_style: "direct"
-      decision_making: "decisive"
       dietary_restrictions: []
-      preferences: []
       health_goals: []
-      cooking_skill: "intermediate"
-      family_size: 1
-      budget_conscious: false
 
     goal: "find_specific_meal"
     description: "Test basic item addition functionality"
     
-    # Global conversation quality expectations
+    # Global conversation expectations
     global_criteria:
       max_turns: 4
       target_turns: 2
-      max_acceptable_clarifications: 0
-      bot_should_ask_clarifying_questions: false
-      should_acknowledge_user_constraints: true
       should_provide_confirmation: true
 
-    # Task-specific meal planning criteria  
+    # Task-specific criteria (simplified)
     task_criteria:
       must_respect_restrictions: []
-      should_accommodate_preferences: []
       nutrition_targets: {}
-      nutrition_education_required: false
-      should_provide_shopping_list: false
-      should_provide_instructions: true
       custom_requirements:
-        item_to_add: "eggs"
-        meal_type: "breakfast"
-        should_confirm_addition: true
+        task: "add eggs to breakfast"
+        should_confirm: true
 
     test_metadata:
       category: "basic"
       difficulty_level: 1
-      estimated_turns: 2
-      
-    # Legacy compatibility
-    legacy:
-      specific_requirements:
-        task: "add eggs to breakfast"
 
   simple_nutrition_check:
     persona:
       name: "Direct User"
-      age: 25
       communication_style: "direct"
       dietary_restrictions: []
-      preferences: []
       health_goals: []
 
     goal: "meet_nutrition_goals"
@@ -65,283 +42,155 @@ basic_scenarios:
     
     global_criteria:
       max_turns: 3
-      target_turns: 2
-      max_acceptable_clarifications: 0
       should_provide_confirmation: true
 
     task_criteria:
-      nutrition_targets: {}
-      nutrition_education_required: false
       custom_requirements:
-        action: "show_current_nutrition"
-        display_calories: true
-        display_macros: true
+        task: "check calories in current meals"
 
     test_metadata:
       category: "basic"
       difficulty_level: 1
-      estimated_turns: 2
-
-    legacy:
-      specific_requirements:
-        task: "check calories in current meals"
 
 # Nutrition-focused scenarios
 nutrition_scenarios:
-  fitness_enthusiast_daily:
+  fitness_high_protein:
     persona:
-      name: "Marcus Johnson"
-      age: 28
+      name: "Fitness User"
       communication_style: "chatty"
-      decision_making: "exploratory"
       dietary_restrictions: []
-      preferences: ["high protein", "pre/post workout meals"]
-      health_goals: ["muscle gain", "performance"]
-      cooking_skill: "beginner"
-      budget_conscious: false
+      health_goals: ["muscle gain"]
 
     goal: "meet_nutrition_goals"
-    description: "Test high-protein meal planning for fitness goals"
+    description: "Test nutrition target conversation flow"
 
     global_criteria:
       max_turns: 8
-      target_turns: 5
-      max_acceptable_clarifications: 2
-      should_acknowledge_user_constraints: true
       should_provide_confirmation: true
 
     task_criteria:
       nutrition_targets:
         calories: 3200
         protein: 200
-        carbs: 400
-      nutrition_education_required: true
-      should_accommodate_preferences: ["high protein", "pre/post workout meals"]
-      required_meal_structure:
-        meals: 3
-        snacks: 2
-      cooking_skill_matching: true
-      should_provide_instructions: true
       custom_requirements:
-        meal_timing: "around workouts"
-        supplements_ok: true
-        beginner_friendly: true
+        task: "create high protein meal plan"
 
     test_metadata:
       category: "nutrition"
       difficulty_level: 2
-      estimated_turns: 5
 
-    legacy:
-      specific_requirements:
-        calorie_target: 3200
-        protein_target: 200
-        carb_target: 400
-        meal_timing: "around workouts"
-        supplements_ok: true
-
-# Safety-critical scenarios (allergies, medical restrictions)
+# Safety-critical scenarios  
 safety_scenarios:
-  parent_allergies_quick:
+  allergy_safety:
     persona:
-      name: "Jennifer Williams"
-      age: 38
+      name: "Allergy Parent"
       communication_style: "uncertain"
-      decision_making: "indecisive"
       dietary_restrictions: ["nut allergy", "dairy-free"]
-      preferences: ["kid-friendly", "quick meals"]
-      health_goals: ["balanced nutrition", "family health"]
-      cooking_skill: "intermediate"
-      time_constraints: "15-20 minutes"
-      family_size: 4
+      health_goals: []
 
     goal: "accommodate_restrictions"
-    description: "Test critical allergy safety and family meal planning"
+    description: "Test critical allergy safety acknowledgment"
 
     global_criteria:
-      max_turns: 10
-      target_turns: 6
-      max_acceptable_clarifications: 3  # Uncertain style may need help
-      should_acknowledge_user_constraints: true
-      should_handle_errors_gracefully: true  # Critical for safety
+      max_turns: 8
       should_provide_confirmation: true
 
     task_criteria:
       must_respect_restrictions: ["nut allergy", "dairy-free"]  # SAFETY CRITICAL
-      should_accommodate_preferences: ["kid-friendly", "quick meals"]
-      family_size_considerations: true
-      prep_time_constraints:
-        max_prep: 20
-      should_provide_shopping_list: true
-      should_provide_instructions: true
       custom_requirements:
-        allergy_warnings_required: true
-        family_portions: 4
-        safety_confirmation: true
-        kid_approved: true
+        task: "find safe dinner options"
+        safety_critical: true
 
     test_metadata:
       category: "safety"
       difficulty_level: 3
-      estimated_turns: 7
 
-    legacy:
-      specific_requirements:
-        meal_type: "dinner"
-        servings: 4
-        kid_approved: true
-        max_prep_time: 20
-
-  diabetic_senior_daily:
+  diabetic_restrictions:
     persona:
-      name: "Robert Thompson"
-      age: 68
-      communication_style: "chatty"
-      dietary_restrictions: ["diabetic", "low sodium"]
-      preferences: ["traditional meals", "easy to chew"]
-      health_goals: ["blood sugar control", "heart health"]
-      cooking_skill: "advanced"
-      tech_savviness: "low"
+      name: "Diabetic User"
+      communication_style: "direct"
+      dietary_restrictions: ["diabetic"]
+      health_goals: ["blood sugar control"]
 
     goal: "create_daily_plan"
-    description: "Test medical dietary restrictions and senior-friendly planning"
+    description: "Test medical dietary restriction handling"
 
     global_criteria:
-      max_turns: 12
-      target_turns: 8
-      max_acceptable_clarifications: 3
-      should_acknowledge_user_constraints: true
+      max_turns: 10
       should_provide_confirmation: true
 
     task_criteria:
-      must_respect_restrictions: ["diabetic", "low sodium"]  # MEDICAL CRITICAL
-      should_accommodate_preferences: ["traditional meals", "easy to chew"]
-      nutrition_education_required: true
-      required_meal_structure:
-        meals: 3
-        snacks: 2
+      must_respect_restrictions: ["diabetic"]  # MEDICAL CRITICAL
       custom_requirements:
-        carb_counting: true
-        glycemic_index: "low"
-        portion_control: true
-        sodium_limits: true
-        traditional_foods: true
+        task: "create diabetic-friendly meal plan"
+        medical_critical: true
 
     test_metadata:
-      category: "medical"
+      category: "safety"
       difficulty_level: 3
-      estimated_turns: 8
 
-# Complex multi-step scenarios
-complex_scenarios:
-  busy_professional_weekly:
+# Multi-step conversation scenarios
+conversation_scenarios:
+  gluten_free_plan:
     persona:
-      name: "Sarah Chen"
-      age: 32
-      communication_style: "direct" 
-      decision_making: "decisive"
+      name: "Gluten-Free User"
+      communication_style: "direct"
       dietary_restrictions: ["gluten-free"]
-      preferences: ["Asian cuisine", "meal prep friendly"]
-      health_goals: ["weight loss", "high protein"]
-      cooking_skill: "intermediate"
-      time_constraints: "30 minutes max per meal"
-      budget_conscious: true
+      health_goals: ["weight loss"]
 
     goal: "create_daily_plan"
-    description: "Test comprehensive weekly meal planning with multiple constraints"
+    description: "Test multi-step conversation with dietary restriction"
 
     global_criteria:
-      max_turns: 15
-      target_turns: 10
-      max_acceptable_clarifications: 3
-      should_acknowledge_user_constraints: true
+      max_turns: 10
       should_provide_confirmation: true
 
     task_criteria:
       must_respect_restrictions: ["gluten-free"]
-      should_accommodate_preferences: ["Asian cuisine", "meal prep friendly"]
       nutrition_targets:
         calories: 1800
-        protein: 120
-      required_meal_structure:
-        meals: 21  # 7 days x 3 meals
-      prep_time_constraints:
-        max_prep: 30
-        prep_day: "Sunday"
-      should_provide_shopping_list: true
-      should_provide_instructions: true
       custom_requirements:
-        meal_prep_focus: true
-        variety_required: true
-        reheatable_meals: true
-        budget_conscious: true
+        task: "create gluten-free daily meal plan"
 
     test_metadata:
-      category: "complex"
-      difficulty_level: 3
-      estimated_turns: 10
+      category: "conversation"
+      difficulty_level: 2
 
-# Beginner-friendly scenarios
-beginner_scenarios:
-  keto_beginner_education:
+  uncertain_user_flow:
     persona:
-      name: "Patricia Brown"
-      age: 42
+      name: "Uncertain User"
       communication_style: "uncertain"
-      decision_making: "indecisive"
-      dietary_restrictions: ["keto"]
-      preferences: ["simple meals", "familiar foods"]
-      health_goals: ["weight loss", "energy"]
-      cooking_skill: "beginner"
+      dietary_restrictions: []
+      health_goals: ["general health"]
 
-    goal: "create_daily_plan"
-    description: "Test educational support for diet beginners"
+    goal: "quick_meal_ideas"
+    description: "Test conversation flow with uncertain communication style"
 
     global_criteria:
-      max_turns: 12
-      target_turns: 8
-      max_acceptable_clarifications: 4  # Needs lots of guidance
-      bot_should_ask_clarifying_questions: true
-      should_acknowledge_user_constraints: true
+      max_turns: 8
       should_provide_confirmation: true
 
     task_criteria:
-      must_respect_restrictions: ["keto"]
-      should_accommodate_preferences: ["simple meals", "familiar foods"]
-      nutrition_targets:
-        carbs: 20  # Max carbs for keto
-      nutrition_education_required: true  # Critical for beginners
-      cooking_skill_matching: true
-      should_provide_instructions: true
       custom_requirements:
-        education_needed: true
-        transition_support: true
-        keto_basics_explanation: true
-        common_mistakes_addressed: true
-        beginner_recipes: true
+        task: "get meal suggestions"
+        communication_test: true
 
     test_metadata:
-      category: "education"
+      category: "conversation"
       difficulty_level: 2
-      estimated_turns: 8
 
-# Configuration metadata
+# Configuration
 config:
   version: "2.0"
-  format: "separated_criteria"
-  default_global_criteria:
-    max_turns: 10
-    target_turns: 5
-    max_acceptable_clarifications: 2
-    bot_should_ask_clarifying_questions: true
-    should_acknowledge_user_constraints: true
-    should_provide_confirmation: true
-    should_handle_errors_gracefully: true
-
-  default_task_criteria:
-    nutrition_education_required: false
-    cooking_skill_matching: true
-    should_provide_instructions: true
-    should_organize_content: true
-    family_size_considerations: false
-    should_provide_shopping_list: false 
+  focus: "conversation_testing"
+  
+  # Defaults for all scenarios
+  defaults:
+    global_criteria:
+      max_turns: 10
+      should_provide_confirmation: true
+    
+    task_criteria:
+      must_respect_restrictions: []
+      nutrition_targets: {}
+      custom_requirements: {} 

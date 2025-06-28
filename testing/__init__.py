@@ -1,29 +1,10 @@
 """Automated testing framework for the meal planning chatbot."""
 
-from src.testing.test_scenarios import (
+from src.testing.evaluation_models import (
     TestScenario,
     UserPersona,
     ConversationGoal,
-    TEST_SCENARIOS,
-    get_scenario_by_id,
-    get_scenarios_by_goal,
-    get_all_scenario_ids
 )
-
-# Import simple test scenarios if available
-try:
-    from src.testing.simple_test_scenarios import (
-        LEVEL_1_SCENARIOS,
-        LEVEL_2_SCENARIOS,
-        LEVEL_3_SCENARIOS,
-        get_simple_scenario_by_id,
-        get_scenarios_by_level,
-        get_curriculum_progression,
-        CurriculumProgress
-    )
-except ImportError:
-    # Simple scenarios not available yet
-    pass
 
 from src.testing.user_agent import (
     user_agent,
@@ -55,10 +36,6 @@ __all__ = [
     "TestScenario",
     "UserPersona", 
     "ConversationGoal",
-    "TEST_SCENARIOS",
-    "get_scenario_by_id",
-    "get_scenarios_by_goal",
-    "get_all_scenario_ids",
     
     # User Agent
     "user_agent",

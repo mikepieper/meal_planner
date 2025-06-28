@@ -8,7 +8,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 import langsmith
 from langsmith import traceable
 
-from src.testing.test_scenarios import TestScenario, get_scenario_by_id, get_all_scenario_ids
+from src.testing.evaluation_models import TestScenario
+from src.testing.scenario_loader import ScenarioLoader
 
 # Import simple scenarios if available
 try:
@@ -28,6 +29,7 @@ class TestRunner:
         self.meal_planning_agent = meal_planning_graph
         self.user_simulation_agent = user_agent
         self.validation_agent = validation_agent
+        self.scenario_loader = ScenarioLoader()
         
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)

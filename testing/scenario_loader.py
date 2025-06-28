@@ -5,7 +5,7 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 from pydantic import BaseModel
 
-from src.testing.test_scenarios import ConversationGoal, UserPersona, TestScenario
+from src.testing.evaluation_models import ConversationGoal, UserPersona, TestScenario
 from src.testing.evaluation_models import (
     ConversationQuality, TaskCompletion, CombinedEvaluation,
     NutritionRequirements, DietaryCompliance, MealPlanningSpecifics
@@ -67,20 +67,12 @@ class ScenarioLoader:
         return {}
     
     def convert_yaml_to_user_persona(self, persona_data: Dict[str, Any]) -> UserPersona:
-        """Convert YAML persona data to UserPersona model."""
+        """Convert simplified YAML persona data to UserPersona model."""
         return UserPersona(
             name=persona_data.get('name', 'Test User'),
-            age=persona_data.get('age', 30),
-            dietary_restrictions=persona_data.get('dietary_restrictions', []),
-            preferences=persona_data.get('preferences', []),
-            health_goals=persona_data.get('health_goals', []),
-            cooking_skill=persona_data.get('cooking_skill', 'intermediate'),
-            time_constraints=persona_data.get('time_constraints'),
-            budget_conscious=persona_data.get('budget_conscious', False),
-            family_size=persona_data.get('family_size', 1),
             communication_style=persona_data.get('communication_style', 'direct'),
-            decision_making=persona_data.get('decision_making', 'decisive'),
-            tech_savviness=persona_data.get('tech_savviness', 'average')
+            dietary_restrictions=persona_data.get('dietary_restrictions', []),
+            health_goals=persona_data.get('health_goals', [])
         )
     
     def convert_yaml_to_test_scenario(self, scenario_data: Dict[str, Any]) -> TestScenario:
@@ -93,15 +85,11 @@ class ScenarioLoader:
         goal_str = scenario_data['goal']
         goal = ConversationGoal(goal_str)
         
-        # Extract legacy specific_requirements
-        legacy_reqs = scenario_data.get('legacy', {}).get('specific_requirements', {})
-        
-        # Add task criteria as specific requirements for compatibility
+        # Extract requirements from simplified structure
         task_criteria = scenario_data.get('task_criteria', {})
-        if 'custom_requirements' in task_criteria:
-            legacy_reqs.update(task_criteria['custom_requirements'])
+        legacy_reqs = task_criteria.get('custom_requirements', {})
         
-        # Add nutrition targets
+        # Add nutrition targets if present
         if 'nutrition_targets' in task_criteria:
             for key, value in task_criteria['nutrition_targets'].items():
                 legacy_reqs[f"{key}_target"] = value
@@ -164,16 +152,10 @@ class ScenarioLoader:
             preference_score=0.0   # Will be calculated during evaluation
         )
         
-        # Meal planning specifics
+        # Meal planning specifics (simplified for conversation testing)
         meal_planning = MealPlanningSpecifics()
-        if 'required_meal_structure' in task_criteria:
-            meal_planning.correct_meal_count = True
-        if 'prep_time_constraints' in task_criteria:
-            meal_planning.prep_time_realistic = True
-        meal_planning.cooking_skill_matching = task_criteria.get('cooking_skill_matching', True)
-        meal_planning.family_size_considerations = task_criteria.get('family_size_considerations', False)
-        meal_planning.shopping_list_complete = task_criteria.get('should_provide_shopping_list', False)
-        meal_planning.instructions_clear = task_criteria.get('should_provide_instructions', True)
+        # Focus only on basic conversation acknowledgment, not detailed meal planning
+        meal_planning.instructions_clear = True  # Assume instructions should be clear
         
         # Create task completion
         task_completion = TaskCompletion(

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import json
 
-from src.testing.test_scenarios import TestScenario
+from src.testing.evaluation_models import TestScenario
 from src.testing.user_agent import UserAgentState
 
 

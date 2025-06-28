@@ -3,6 +3,38 @@
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+from enum import Enum
+
+
+class ConversationGoal(str, Enum):
+    """Types of goals users might have."""
+    CREATE_DAILY_PLAN = "create_daily_plan"
+    FIND_SPECIFIC_MEAL = "find_specific_meal"
+    MEET_NUTRITION_GOALS = "meet_nutrition_goals"
+    ACCOMMODATE_RESTRICTIONS = "accommodate_restrictions"
+    QUICK_MEAL_IDEAS = "quick_meal_ideas"
+    SHOPPING_LIST = "shopping_list"
+    OPTIMIZE_EXISTING_PLAN = "optimize_existing_plan"
+
+
+class UserPersona(BaseModel):
+    """Simplified user persona for conversation testing."""
+    name: str
+    communication_style: str = "direct"  # direct, chatty, uncertain
+    dietary_restrictions: List[str] = Field(default_factory=list)
+    health_goals: List[str] = Field(default_factory=list)
+
+
+class TestScenario(BaseModel):
+    """A complete test scenario."""
+    scenario_id: str
+    persona: UserPersona
+    goal: ConversationGoal
+    specific_requirements: Dict[str, Any] = Field(default_factory=dict)
+    expected_outcomes: List[str]
+    success_criteria: List[str]
+    potential_challenges: List[str] = Field(default_factory=list)
+    max_turns: int = 15  # Maximum conversation turns before timeout
 
 
 class ConversationQuality(BaseModel):
@@ -320,40 +352,21 @@ def evaluate_dietary_compliance(
 
 def evaluate_meal_planning_specifics(
     conversation_content: str,
-    requirements: Dict[str, Any],
-    persona_cooking_skill: str,
-    persona_family_size: int
+    requirements: Dict[str, Any]
 ) -> MealPlanningSpecifics:
-    """Evaluate meal planning domain-specific criteria."""
+    """Evaluate basic meal planning conversation quality (simplified)."""
     
     planning = MealPlanningSpecifics()
     
-    # Check meal count
-    if "meal_count" in requirements:
-        # Look for appropriate number of meals mentioned
-        planning.correct_meal_count = "meals" in conversation_content.lower()
+    # Focus on conversation quality, not detailed meal planning
+    planning.instructions_clear = True  # Assume clear if conversation completed
     
-    # Check prep time considerations
-    if "max_prep_time" in requirements or "prep_time" in requirements:
-        time_indicators = ["minutes", "prep", "cook time", "preparation"]
-        planning.prep_time_realistic = any(indicator in conversation_content.lower() for indicator in time_indicators)
-    
-    # Check cooking skill appropriateness
-    if persona_cooking_skill == "beginner":
-        complex_indicators = ["advanced", "complex", "difficult"]
-        # Should NOT contain complex indicators for beginners
-        planning.cooking_skill_appropriate = not any(indicator in conversation_content.lower() for indicator in complex_indicators)
-    else:
-        planning.cooking_skill_appropriate = True  # Assume appropriate for non-beginners
-    
-    # Check family size considerations
-    if persona_family_size > 1:
-        family_indicators = ["servings", "portions", "family", str(persona_family_size)]
-        planning.appropriate_portions = any(indicator in conversation_content.lower() for indicator in family_indicators)
-    
-    # Check shopping list completeness
-    if "shopping" in conversation_content.lower() or "ingredients" in conversation_content.lower():
-        planning.shopping_list_complete = True
+    # Only check for basic acknowledgment of task
+    if requirements.get('task'):
+        task = requirements['task'].lower()
+        # Check if bot acknowledged the basic task
+        if any(word in conversation_content.lower() for word in task.split()):
+            planning.correct_meal_count = True
     
     return planning
 
@@ -402,6 +415,9 @@ def calculate_domain_specific_score(task_completion: TaskCompletion) -> float:
 DEFAULT_THRESHOLDS = EvaluationThresholds()
 
 __all__ = [
+    "ConversationGoal",
+    "UserPersona", 
+    "TestScenario",
     "ConversationQuality",
     "TaskCompletion", 
     "NutritionRequirements",

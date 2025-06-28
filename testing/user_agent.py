@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
 import os
 
-from src.testing.test_scenarios import TestScenario, UserPersona, ConversationGoal
+from src.testing.evaluation_models import TestScenario, UserPersona, ConversationGoal
 
 
 class UserState(BaseModel):
