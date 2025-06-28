@@ -52,8 +52,6 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 ### Subtask 2.3: Update Validation Logic
 - [ ] Modify validation to score global and task-specific metrics separately
 - [ ] Create combined scoring logic that weights both appropriately
-- [ ] Update reporting to show both types of metrics clearly
-- [ ] Test with existing scenarios to ensure accuracy
 
 ## Task 3: Focus on Core Scenarios (80/20 Rule) 🎯
 **Goal**: Identify and prioritize the 20% of scenarios that catch 80% of issues.

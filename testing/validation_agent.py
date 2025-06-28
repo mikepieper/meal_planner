@@ -8,48 +8,17 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import json
 
-from src.testing.evaluation_models import TestScenario
+from src.testing.evaluation_models import (
+    TestScenario, CombinedEvaluation, ConversationQuality, TaskCompletion,
+    calculate_efficiency_score, calculate_clarity_score, calculate_overall_score,
+    determine_recommendation, evaluate_nutrition_requirements, 
+    evaluate_dietary_compliance, evaluate_meal_planning_specifics,
+    calculate_domain_specific_score, DEFAULT_THRESHOLDS
+)
 from src.testing.user_agent import UserAgentState
 
-
-class ValidationReport(BaseModel):
-    """Comprehensive validation report for a test conversation."""
-    
-    # Test metadata
-    scenario_id: str
-    timestamp: datetime = Field(default_factory=datetime.now)
-    
-    # Goal achievement
-    goal_achieved: bool
-    goal_achievement_score: float  # 0-1 scale
-    criteria_results: Dict[str, bool] = Field(default_factory=dict)
-    missing_criteria: List[str] = Field(default_factory=list)
-    
-    # Conversation quality
-    efficiency_score: float  # 0-1 scale (based on turns needed)
-    clarity_score: float  # 0-1 scale (based on confusion level)
-    user_satisfaction_score: float  # 0-1 scale
-    
-    # User experience issues
-    pain_points: List[str] = Field(default_factory=list)
-    confusion_moments: List[Dict[str, str]] = Field(default_factory=list)
-    bot_errors: List[str] = Field(default_factory=list)
-    
-    # Conversation analysis
-    total_turns: int
-    user_clarification_requests: int
-    bot_clarification_requests: int
-    decision_points: List[Dict[str, str]] = Field(default_factory=list)
-    
-    # Improvement suggestions
-    immediate_fixes: List[str] = Field(default_factory=list)
-    enhancement_suggestions: List[str] = Field(default_factory=list)
-    new_test_suggestions: List[str] = Field(default_factory=list)
-    
-    # Overall assessment
-    overall_score: float  # 0-1 scale
-    summary: str
-    recommendation: str  # "pass", "needs_improvement", "fail"
+# Backward compatibility alias
+ValidationReport = CombinedEvaluation
 
 
 class ValidationState(BaseModel):
@@ -57,7 +26,9 @@ class ValidationState(BaseModel):
     scenario: TestScenario
     conversation: List[BaseMessage]
     user_state: UserAgentState
-    report: Optional[ValidationReport] = None
+    conversation_quality: Optional[ConversationQuality] = None
+    task_completion: Optional[TaskCompletion] = None
+    report: Optional[CombinedEvaluation] = None
 
 
 def create_validation_agent():
@@ -65,253 +36,261 @@ def create_validation_agent():
     
     llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
     
-    def analyze_goal_achievement(state: ValidationState) -> Dict[str, Any]:
-        """Analyze whether the user's goal was achieved."""
-        
-        scenario = state.scenario
-        conversation = state.conversation
-        user_state = state.user_state
-        
-        # Check if this is a trajectory evaluation (hit max turns without completion)
-        is_trajectory_eval = (user_state.turn_count >= scenario.max_turns and 
-                            not user_state.goal_achieved and
-                            "trajectory" in scenario.scenario_id)
-        
-        prompt = f"""Analyze this conversation to determine goal achievement.
-
-SCENARIO: {scenario.scenario_id}
-USER GOAL: {scenario.goal.value}
-SPECIFIC REQUIREMENTS: {json.dumps(scenario.specific_requirements, indent=2)}
-TURN COUNT: {user_state.turn_count}/{scenario.max_turns}
-
-SUCCESS CRITERIA:
-{chr(10).join(f"- {criterion}" for criterion in scenario.success_criteria)}
-
-{"TRAJECTORY EVALUATION MODE: Task incomplete due to turn limit. Evaluate PROGRESS and EFFICIENCY instead of completion." if is_trajectory_eval else ""}
-
-CONVERSATION:
-{format_conversation(conversation)}
-
-Analyze each success criterion and determine:
-1. Was it met? (true/false)
-2. If not, what was missing?
-3. Overall goal achievement score (0-1)
-{f"4. For trajectory eval: Score based on (a) clear progress each turn, (b) no circular conversations, (c) efficient path toward goal" if is_trajectory_eval else ""}
-
-Respond in JSON format:
-{{
-    "goal_achieved": true/false,
-    "goal_achievement_score": 0.0-1.0,
-    "criteria_results": {{
-        "criterion_name": true/false
-    }},
-    "missing_criteria": ["list of unmet criteria"],
-    "analysis": "Brief explanation",
-    "trajectory_score": 0.0-1.0 (if trajectory evaluation),
-    "progress_notes": "explanation of progress made"
-}}"""
-
-        response = llm.invoke([SystemMessage(content=prompt)])
-        
-        # Parse response (in production, use proper JSON parsing with error handling)
-        try:
-            result = json.loads(response.content)
-            return {"report": ValidationReport(
-                scenario_id=scenario.scenario_id,
-                goal_achieved=result["goal_achieved"],
-                goal_achievement_score=result["goal_achievement_score"],
-                criteria_results=result["criteria_results"],
-                missing_criteria=result["missing_criteria"]
-            )}
-        except:
-            # Fallback parsing
-            return {"report": ValidationReport(
-                scenario_id=scenario.scenario_id,
-                goal_achieved=state.user_state.goal_achieved,
-                goal_achievement_score=0.5 if state.user_state.goal_achieved else 0.0,
-                efficiency_score=0.5,
-                clarity_score=0.5,
-                user_satisfaction_score=state.user_state.satisfaction_level,
-                total_turns=state.user_state.turn_count,
-                user_clarification_requests=state.user_state.asked_for_clarification,
-                bot_clarification_requests=0,
-                overall_score=0.5,
-                summary="Analysis failed, using fallback values",
-                recommendation="needs_improvement"
-            )}
-    
     def analyze_conversation_quality(state: ValidationState) -> Dict[str, Any]:
-        """Analyze the quality of the conversation."""
+        """Analyze global conversation quality metrics."""
         
         scenario = state.scenario
         conversation = state.conversation
         user_state = state.user_state
         
-        prompt = f"""Analyze the conversation quality and user experience.
+        conversation_text = format_conversation(conversation)
+        
+        prompt = f"""Analyze the GLOBAL conversation quality (independent of meal planning domain).
 
 CONVERSATION:
-{format_conversation(conversation)}
+{conversation_text}
 
-USER EMOTIONAL STATE:
+USER STATE:
 - Final satisfaction: {user_state.satisfaction_level}
 - Final confusion: {user_state.confusion_level}
 - Final impatience: {user_state.impatience_level}
 - Clarifications requested: {user_state.asked_for_clarification}
+- Turn count: {user_state.turn_count}/{scenario.max_turns}
 
-Analyze:
-1. Efficiency (was the goal achieved with minimal turns?)
-2. Clarity (was the bot clear and easy to understand?)
-3. User satisfaction (did the user seem happy with the interaction?)
-4. Pain points (any moments of frustration or confusion?)
-5. Bot errors (incorrect information, misunderstandings, etc.)
+Analyze UNIVERSAL conversation quality metrics:
+1. Efficiency: How well did the conversation flow? Was it concise or did it drag?
+2. Clarity: Were the bot's responses clear and understandable?
+3. User satisfaction: Did the user seem happy with the interaction style?
+4. Pain points: General usability issues (not domain-specific)
+5. Bot errors: Technical/logical errors in conversation flow
+6. Confusion moments: When did the user get confused about the process?
+
+Focus on CONVERSATION QUALITY, not meal planning knowledge.
 
 Respond in JSON format:
 {{
     "efficiency_score": 0.0-1.0,
     "clarity_score": 0.0-1.0,
     "user_satisfaction_score": 0.0-1.0,
-    "pain_points": ["list of issues"],
+    "pain_points": ["general usability issues"],
     "confusion_moments": [
-        {{"turn": X, "issue": "description"}}
+        {{"turn": X, "issue": "description of confusion"}}
     ],
-    "bot_errors": ["list of errors"],
+    "bot_errors": ["conversation flow errors"],
     "decision_points": [
-        {{"turn": X, "decision": "what was decided"}}
-    ],
-    "analysis": "Brief summary"
+        {{"turn": X, "decision": "key decision in conversation"}}
+    ]
 }}"""
 
         response = llm.invoke([SystemMessage(content=prompt)])
         
-        # Parse and update report
         try:
             result = json.loads(response.content)
-            report = state.report
-            report.efficiency_score = result["efficiency_score"]
-            report.clarity_score = result["clarity_score"]
-            report.user_satisfaction_score = result["user_satisfaction_score"]
-            report.pain_points = result["pain_points"]
-            report.confusion_moments = result["confusion_moments"]
-            report.bot_errors = result["bot_errors"]
-            report.decision_points = result["decision_points"]
-            report.total_turns = user_state.turn_count
-            report.user_clarification_requests = user_state.asked_for_clarification
-            return {"report": report}
-        except:
-            # Fallback
-            report = state.report
-            report.efficiency_score = min(1.0, 1.0 - (user_state.turn_count / scenario.max_turns))
-            report.clarity_score = 1.0 - user_state.confusion_level
-            report.user_satisfaction_score = user_state.satisfaction_level
-            report.total_turns = user_state.turn_count
-            return {"report": report}
+            
+            # Calculate scores using our evaluation functions
+            total_clarifications = user_state.asked_for_clarification + result.get("bot_clarification_requests", 0)
+            
+            conversation_quality = ConversationQuality(
+                efficiency_score=calculate_efficiency_score(
+                    user_state.turn_count, scenario.max_turns, user_state.goal_achieved
+                ),
+                clarity_score=calculate_clarity_score(
+                    total_clarifications, result["confusion_moments"], DEFAULT_THRESHOLDS
+                ),
+                user_satisfaction_score=result["user_satisfaction_score"],
+                total_turns=user_state.turn_count,
+                user_clarification_requests=user_state.asked_for_clarification,
+                bot_clarification_requests=result.get("bot_clarification_requests", 0),
+                pain_points=result["pain_points"],
+                confusion_moments=result["confusion_moments"],
+                bot_errors=result["bot_errors"],
+                decision_points=result["decision_points"]
+            )
+            
+            return {"conversation_quality": conversation_quality}
+            
+        except Exception as e:
+            # Fallback calculation
+            conversation_quality = ConversationQuality(
+                efficiency_score=calculate_efficiency_score(
+                    user_state.turn_count, scenario.max_turns, user_state.goal_achieved
+                ),
+                clarity_score=1.0 - user_state.confusion_level,
+                user_satisfaction_score=user_state.satisfaction_level,
+                total_turns=user_state.turn_count,
+                user_clarification_requests=user_state.asked_for_clarification,
+                bot_clarification_requests=0,
+                pain_points=["Analysis failed - using fallback"],
+                confusion_moments=[],
+                bot_errors=[],
+                decision_points=[]
+            )
+            return {"conversation_quality": conversation_quality}
     
-    def generate_improvements(state: ValidationState) -> Dict[str, Any]:
-        """Generate improvement suggestions based on the analysis."""
+    def analyze_task_completion(state: ValidationState) -> Dict[str, Any]:
+        """Analyze task-specific completion and domain knowledge."""
         
-        report = state.report
         scenario = state.scenario
         conversation = state.conversation
+        user_state = state.user_state
         
-        prompt = f"""Based on this conversation analysis, suggest improvements.
+        conversation_text = format_conversation(conversation)
+        
+        # Evaluate domain-specific components using helper functions
+        nutrition = evaluate_nutrition_requirements(conversation_text, scenario.specific_requirements)
+        dietary_compliance = evaluate_dietary_compliance(
+            conversation_text, 
+            scenario.persona.dietary_restrictions,
+            []  # preferences simplified out
+        )
+        meal_planning = evaluate_meal_planning_specifics(conversation_text, scenario.specific_requirements)
+        
+        prompt = f"""Analyze TASK COMPLETION for this meal planning conversation.
 
 SCENARIO: {scenario.scenario_id}
-GOAL ACHIEVEMENT: {report.goal_achieved} (score: {report.goal_achievement_score})
-MISSING CRITERIA: {report.missing_criteria}
-PAIN POINTS: {report.pain_points}
-BOT ERRORS: {report.bot_errors}
-USER SATISFACTION: {report.user_satisfaction_score}
+USER GOAL: {scenario.goal.value}
+SPECIFIC REQUIREMENTS: {json.dumps(scenario.specific_requirements, indent=2)}
 
-CONVERSATION EXCERPT (problematic parts):
-{format_conversation(conversation[-10:])}  # Last 10 messages
+SUCCESS CRITERIA:
+{chr(10).join(f"- {criterion}" for criterion in scenario.success_criteria)}
 
-Generate:
-1. Immediate fixes (critical issues to address)
-2. Enhancement suggestions (ways to improve the experience)
-3. New test suggestions (edge cases to test based on this conversation)
+CONVERSATION:
+{conversation_text}
 
-Consider:
-- How to better handle {scenario.persona.communication_style} communication style
-- How to address the specific requirements: {scenario.specific_requirements}
-- How to avoid the confusion moments and pain points
+Analyze TASK-SPECIFIC completion:
+1. Was the main goal achieved? 
+2. How well were the specific success criteria met?
+3. What requirements were missed?
+4. Score the goal achievement (0-1 based on criteria completion)
+
+Focus on MEAL PLANNING TASK completion, not conversation quality.
 
 Respond in JSON format:
 {{
-    "immediate_fixes": ["list of critical fixes"],
-    "enhancement_suggestions": ["list of improvements"],
-    "new_test_suggestions": ["list of new test scenarios to create"],
-    "specific_recommendations": "Detailed explanation"
+    "goal_achieved": true/false,
+    "goal_achievement_score": 0.0-1.0,
+    "custom_criteria_results": {{
+        "criterion_name": true/false
+    }},
+    "missing_criteria": ["list of unmet requirements"],
+    "analysis": "Brief explanation of task completion"
 }}"""
 
         response = llm.invoke([SystemMessage(content=prompt)])
         
-        # Parse and update report
         try:
             result = json.loads(response.content)
-            report.immediate_fixes = result["immediate_fixes"]
-            report.enhancement_suggestions = result["enhancement_suggestions"]
-            report.new_test_suggestions = result["new_test_suggestions"]
-            return {"report": report}
-        except:
-            # Fallback suggestions
-            report.immediate_fixes = ["Review conversation for specific failure points"]
-            report.enhancement_suggestions = ["Improve response clarity", "Add more guidance"]
-            return {"report": report}
+            
+            # Create TaskCompletion with calculated domain score
+            task_completion = TaskCompletion(
+                goal_achieved=result["goal_achieved"],
+                goal_achievement_score=result["goal_achievement_score"],
+                nutrition=nutrition,
+                dietary_compliance=dietary_compliance,
+                meal_planning=meal_planning,
+                custom_criteria_results=result["custom_criteria_results"],
+                missing_criteria=result["missing_criteria"],
+                domain_specific_score=0.0  # Will be calculated below
+            )
+            
+            # Calculate domain-specific score
+            task_completion.domain_specific_score = calculate_domain_specific_score(task_completion)
+            
+            return {"task_completion": task_completion}
+            
+        except Exception as e:
+            # Fallback
+            task_completion = TaskCompletion(
+                goal_achieved=user_state.goal_achieved,
+                goal_achievement_score=0.5 if user_state.goal_achieved else 0.0,
+                nutrition=nutrition,
+                dietary_compliance=dietary_compliance,
+                meal_planning=meal_planning,
+                domain_specific_score=0.5
+            )
+            return {"task_completion": task_completion}
     
-    def generate_final_assessment(state: ValidationState) -> Dict[str, Any]:
-        """Generate final assessment and recommendations."""
+    def generate_combined_evaluation(state: ValidationState) -> Dict[str, Any]:
+        """Generate final combined evaluation with improvement suggestions."""
         
-        report = state.report
+        scenario = state.scenario
+        conversation = state.conversation
+        conversation_quality = state.conversation_quality
+        task_completion = state.task_completion
         
-        # Calculate overall score
-        weights = {
-            "goal": 0.4,
-            "efficiency": 0.2,
-            "clarity": 0.2,
-            "satisfaction": 0.2
-        }
-        
-        overall_score = (
-            weights["goal"] * report.goal_achievement_score +
-            weights["efficiency"] * report.efficiency_score +
-            weights["clarity"] * report.clarity_score +
-            weights["satisfaction"] * report.user_satisfaction_score
-        )
-        
-        report.overall_score = overall_score
+        # Calculate overall score using weighted combination
+        overall_score = calculate_overall_score(conversation_quality, task_completion)
         
         # Determine recommendation
-        if overall_score >= 0.8 and report.goal_achieved:
-            report.recommendation = "pass"
-        elif overall_score >= 0.6 or (report.goal_achieved and overall_score >= 0.5):
-            report.recommendation = "needs_improvement"
-        else:
-            report.recommendation = "fail"
+        recommendation = determine_recommendation(overall_score, task_completion.goal_achieved, DEFAULT_THRESHOLDS)
         
-        # Generate summary
-        report.summary = f"""Test scenario '{state.scenario.scenario_id}' completed with overall score: {overall_score:.2f}.
-Goal achievement: {'Yes' if report.goal_achieved else 'No'} ({report.goal_achievement_score:.2f})
-User experience: Efficiency={report.efficiency_score:.2f}, Clarity={report.clarity_score:.2f}, Satisfaction={report.user_satisfaction_score:.2f}
-Major issues: {len(report.pain_points)} pain points, {len(report.bot_errors)} bot errors
-Recommendation: {report.recommendation.upper()}"""
+        # Generate improvement suggestions with LLM
+        prompt = f"""Based on this evaluation, suggest improvements.
+
+SCENARIO: {scenario.scenario_id}
+GOAL ACHIEVED: {task_completion.goal_achieved} (score: {task_completion.goal_achievement_score})
+OVERALL SCORE: {overall_score:.2f}
+RECOMMENDATION: {recommendation}
+
+CONVERSATION QUALITY:
+- Efficiency: {conversation_quality.efficiency_score:.2f}
+- Clarity: {conversation_quality.clarity_score:.2f}
+- Satisfaction: {conversation_quality.user_satisfaction_score:.2f}
+- Pain points: {conversation_quality.pain_points}
+
+TASK COMPLETION:
+- Missing criteria: {task_completion.missing_criteria}
+- Domain score: {task_completion.domain_specific_score:.2f}
+
+Generate suggestions separating GLOBAL vs TASK-SPECIFIC improvements:
+
+Respond in JSON format:
+{{
+    "global_improvements": ["conversation quality improvements that apply to ALL scenarios"],
+    "task_specific_improvements": ["meal planning specific improvements for this scenario type"],
+    "summary": "Brief assessment of what worked and what didn't"
+}}"""
+
+        response = llm.invoke([SystemMessage(content=prompt)])
         
-        return {"report": report}
+        try:
+            result = json.loads(response.content)
+            global_improvements = result["global_improvements"]
+            task_specific_improvements = result["task_specific_improvements"]
+            summary = result["summary"]
+        except:
+            # Fallback
+            global_improvements = ["Improve conversation flow and clarity"]
+            task_specific_improvements = ["Better handle meal planning requirements"]
+            summary = f"Test completed with score {overall_score:.2f}. {'Goal achieved' if task_completion.goal_achieved else 'Goal not achieved'}."
+        
+        # Create combined evaluation
+        combined_evaluation = CombinedEvaluation(
+            scenario_id=scenario.scenario_id,
+            conversation_quality=conversation_quality,
+            task_completion=task_completion,
+            overall_score=overall_score,
+            recommendation=recommendation,
+            summary=summary,
+            global_improvements=global_improvements,
+            task_specific_improvements=task_specific_improvements
+        )
+        
+        return {"report": combined_evaluation}
     
     # Build the graph
     graph = StateGraph(ValidationState)
     
     # Add nodes
-    graph.add_node("analyze_goal", analyze_goal_achievement)
     graph.add_node("analyze_quality", analyze_conversation_quality)
-    graph.add_node("generate_improvements", generate_improvements)
-    graph.add_node("final_assessment", generate_final_assessment)
+    graph.add_node("analyze_task", analyze_task_completion)
+    graph.add_node("generate_final", generate_combined_evaluation)
     
     # Add edges
-    graph.add_edge(START, "analyze_goal")
-    graph.add_edge("analyze_goal", "analyze_quality")
-    graph.add_edge("analyze_quality", "generate_improvements")
-    graph.add_edge("generate_improvements", "final_assessment")
-    graph.add_edge("final_assessment", END)
+    graph.add_edge(START, "analyze_quality")
+    graph.add_edge("analyze_quality", "analyze_task")
+    graph.add_edge("analyze_task", "generate_final")
+    graph.add_edge("generate_final", END)
     
     return graph.compile()
 
@@ -325,7 +304,7 @@ def format_conversation(messages: List[BaseMessage]) -> str:
     return "\n".join(formatted)
 
 
-def save_validation_report(report: ValidationReport, output_dir: str = "test_results"):
+def save_validation_report(report: CombinedEvaluation, output_dir: str = "test_results"):
     """Save validation report to file."""
     import os
     
@@ -348,36 +327,52 @@ def save_validation_report(report: ValidationReport, output_dir: str = "test_res
         f.write("## Summary\n")
         f.write(f"{report.summary}\n\n")
         
-        f.write("## Goal Achievement\n")
-        f.write(f"- **Goal Achieved**: {'✅ Yes' if report.goal_achieved else '❌ No'}\n")
-        f.write(f"- **Achievement Score**: {report.goal_achievement_score:.2f}\n")
-        if report.missing_criteria:
+        f.write("## Task Completion\n")
+        f.write(f"- **Goal Achieved**: {'✅ Yes' if report.task_completion.goal_achieved else '❌ No'}\n")
+        f.write(f"- **Achievement Score**: {report.task_completion.goal_achievement_score:.2f}\n")
+        f.write(f"- **Domain Score**: {report.task_completion.domain_specific_score:.2f}\n")
+        if report.task_completion.missing_criteria:
             f.write("- **Missing Criteria**:\n")
-            for criterion in report.missing_criteria:
+            for criterion in report.task_completion.missing_criteria:
                 f.write(f"  - {criterion}\n")
         f.write("\n")
         
-        f.write("## User Experience\n")
-        f.write(f"- **Efficiency**: {report.efficiency_score:.2f} ({report.total_turns} turns)\n")
-        f.write(f"- **Clarity**: {report.clarity_score:.2f}\n")
-        f.write(f"- **Satisfaction**: {report.user_satisfaction_score:.2f}\n\n")
+        f.write("## Conversation Quality\n")
+        f.write(f"- **Efficiency**: {report.conversation_quality.efficiency_score:.2f} ({report.conversation_quality.total_turns} turns)\n")
+        f.write(f"- **Clarity**: {report.conversation_quality.clarity_score:.2f}\n")
+        f.write(f"- **Satisfaction**: {report.conversation_quality.user_satisfaction_score:.2f}\n\n")
         
-        if report.pain_points:
-            f.write("## Pain Points\n")
-            for point in report.pain_points:
+        if report.conversation_quality.pain_points:
+            f.write("## Pain Points (Global)\n")
+            for point in report.conversation_quality.pain_points:
                 f.write(f"- {point}\n")
             f.write("\n")
         
-        if report.immediate_fixes:
-            f.write("## Immediate Fixes Needed\n")
-            for fix in report.immediate_fixes:
-                f.write(f"- {fix}\n")
+        if report.global_improvements:
+            f.write("## Global Improvements (Apply to All Scenarios)\n")
+            for improvement in report.global_improvements:
+                f.write(f"- {improvement}\n")
             f.write("\n")
         
-        if report.enhancement_suggestions:
-            f.write("## Enhancement Suggestions\n")
-            for suggestion in report.enhancement_suggestions:
-                f.write(f"- {suggestion}\n")
+        if report.task_specific_improvements:
+            f.write("## Task-Specific Improvements\n")
+            for improvement in report.task_specific_improvements:
+                f.write(f"- {improvement}\n")
+            f.write("\n")
+        
+        # Add detailed breakdowns
+        f.write("## Dietary Compliance\n")
+        if report.task_completion.dietary_compliance.restrictions_respected:
+            f.write("- **Restrictions Respected**:\n")
+            for restriction, respected in report.task_completion.dietary_compliance.restrictions_respected.items():
+                f.write(f"  - {restriction}: {'✅' if respected else '❌'}\n")
+        f.write(f"- **Safety Score**: {report.task_completion.dietary_compliance.safety_score:.2f}\n")
+        f.write(f"- **Preference Score**: {report.task_completion.dietary_compliance.preference_score:.2f}\n\n")
+        
+        if report.conversation_quality.confusion_moments:
+            f.write("## Confusion Moments\n")
+            for moment in report.conversation_quality.confusion_moments:
+                f.write(f"- Turn {moment.get('turn', '?')}: {moment.get('issue', 'Unknown issue')}\n")
     
     return filename, summary_filename
 
