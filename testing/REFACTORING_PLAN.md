@@ -34,11 +34,11 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 ## Task 2: Separate Global vs Task-Specific Metrics 📊
 **Goal**: Clearly distinguish between universal conversation quality metrics and scenario-specific success criteria.
 
-### Subtask 2.1: Define Global Conversation Quality Metrics
-- [ ] Identify metrics that apply to ALL conversations regardless of scenario
-- [ ] Create `ConversationQuality` model with efficiency, clarity, satisfaction scores
-- [ ] Define standard thresholds and scoring logic for global metrics
-- [ ] Document what each global metric measures
+### Subtask 2.1: Define Global Conversation Quality Metrics ✅ COMPLETE
+- [x] Identify metrics that apply to ALL conversations regardless of scenario
+- [x] Create `ConversationQuality` model with efficiency, clarity, satisfaction scores
+- [x] Define standard thresholds and scoring logic for global metrics
+- [x] Document what each global metric measures
 
 ### Subtask 2.2: Define Task-Specific Success Criteria
 - [ ] Create `TaskCompletion` model for scenario-specific outcomes
