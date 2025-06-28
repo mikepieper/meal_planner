@@ -413,25 +413,3 @@ def calculate_domain_specific_score(task_completion: TaskCompletion) -> float:
 
 # Default thresholds instance
 DEFAULT_THRESHOLDS = EvaluationThresholds()
-
-__all__ = [
-    "ConversationGoal",
-    "UserPersona", 
-    "TestScenario",
-    "ConversationQuality",
-    "TaskCompletion", 
-    "NutritionRequirements",
-    "DietaryCompliance", 
-    "MealPlanningSpecifics",
-    "EvaluationThresholds",
-    "CombinedEvaluation",
-    "calculate_efficiency_score",
-    "calculate_clarity_score", 
-    "calculate_overall_score",
-    "determine_recommendation",
-    "evaluate_nutrition_requirements",
-    "evaluate_dietary_compliance",
-    "evaluate_meal_planning_specifics", 
-    "calculate_domain_specific_score",
-    "DEFAULT_THRESHOLDS"
-] 

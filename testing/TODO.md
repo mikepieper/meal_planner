@@ -1,1 +1,0 @@
-- There are some success criteria (e.g. no circular conversations) in individual personas that are general. These should be extracted into general evaluation.
