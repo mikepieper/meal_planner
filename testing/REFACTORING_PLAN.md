@@ -87,11 +87,14 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 - **Files Created**: `langsmith_integration.py`, `example_langsmith_setup.py`
 - **Key Features**: Automated YAML→LangSmith conversion, category/complexity tagging, safety-critical flagging
 
-### Subtask 4.2: Create LangSmith Evaluators
-- [ ] Convert global conversation quality metrics to LangSmith evaluators
-- [ ] Create task-specific evaluators for domain knowledge
-- [ ] Set up batch evaluation workflows
-- [ ] Test evaluators against known good/bad conversations
+### Subtask 4.2: Create LangSmith Evaluators ✅ COMPLETE
+- [x] Convert global conversation quality metrics to LangSmith evaluators
+- [x] Create task-specific evaluators for domain knowledge
+- [x] Set up batch evaluation workflows
+- [x] Test evaluators against known good/bad conversations
+- **Files Created**: `langsmith_evaluators.py` with sophisticated LLM-based evaluation logic
+- **Key Features**: Migrated validation_agent.py logic, safety-critical evaluation, fallback handling
+- **Clean Separation**: Integration vs evaluation logic properly separated
 
 ### Subtask 4.3: Update Test Runner for LangSmith
 - [ ] Modify test runner to use LangSmith datasets instead of local scenarios

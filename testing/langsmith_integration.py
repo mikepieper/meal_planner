@@ -11,9 +11,7 @@ from pydantic import BaseModel
 
 from src.testing.scenario_loader import ScenarioLoader
 from src.testing.evaluation_models import (
-    ConversationGoal, UserPersona, TestScenario, ConversationQuality, 
-    TaskCompletion, CombinedEvaluation, calculate_overall_score,
-    determine_recommendation, DEFAULT_THRESHOLDS
+    ConversationGoal, UserPersona, TestScenario
 )
 
 
@@ -180,84 +178,12 @@ class LangSmithConverter:
         return list(self.client.list_examples(dataset_id=dataset.id))
 
 
-class ConversationQualityEvaluator(LangChainStringEvaluator):
-    """LangSmith evaluator for global conversation quality."""
-    
-    def __init__(self):
-        super().__init__()
-        self.evaluation_name = "conversation_quality"
-    
-    def _evaluate_strings(
-        self,
-        prediction: str,
-        reference: str = None,
-        input: str = None,
-        **kwargs
-    ) -> dict:
-        """Evaluate conversation quality from conversation text."""
-        
-        # This would be called with the full conversation as 'prediction'
-        # and the scenario reference data as 'reference'
-        
-        # For now, return a simple score - we'll enhance this
-        # In practice, this would use our ConversationQuality evaluation logic
-        return {
-            "key": "conversation_quality",
-            "score": 0.8,  # Placeholder
-            "value": "PASS",
-            "comment": "Conversation quality evaluation placeholder"
-        }
-
-
-class TaskCompletionEvaluator(LangChainStringEvaluator):
-    """LangSmith evaluator for task-specific completion."""
-    
-    def __init__(self):
-        super().__init__()
-        self.evaluation_name = "task_completion"
-    
-    def _evaluate_strings(
-        self,
-        prediction: str,
-        reference: str = None,
-        input: str = None,
-        **kwargs
-    ) -> dict:
-        """Evaluate task completion from conversation text."""
-        
-        # This would use our TaskCompletion evaluation logic
-        return {
-            "key": "task_completion",
-            "score": 0.7,  # Placeholder
-            "value": "PARTIAL",
-            "comment": "Task completion evaluation placeholder"
-        }
-
-
-class SafetyComplianceEvaluator(LangChainStringEvaluator):
-    """LangSmith evaluator for safety-critical compliance (dietary restrictions)."""
-    
-    def __init__(self):
-        super().__init__()
-        self.evaluation_name = "safety_compliance"
-    
-    def _evaluate_strings(
-        self,
-        prediction: str,
-        reference: str = None,
-        input: str = None,
-        **kwargs
-    ) -> dict:
-        """Evaluate safety compliance (critical for dietary restrictions)."""
-        
-        # This would check for dietary restriction violations
-        # High severity since safety-critical
-        return {
-            "key": "safety_compliance",
-            "score": 1.0,  # Placeholder
-            "value": "SAFE",
-            "comment": "Safety compliance evaluation placeholder"
-        }
+# Import real evaluators from separate module
+from src.testing.langsmith_evaluators import (
+    ConversationQualityEvaluator,
+    TaskCompletionEvaluator,
+    SafetyComplianceEvaluator
+)
 
 
 class LangSmithEvaluationRunner:

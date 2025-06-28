@@ -25,6 +25,13 @@ from src.testing.langsmith_integration import (
     LangSmithEvaluationRunner
 )
 
+# Import our sophisticated evaluators
+from src.testing.langsmith_evaluators import (
+    ConversationQualityEvaluator,
+    TaskCompletionEvaluator,
+    SafetyComplianceEvaluator
+)
+
 # Import our existing components that we'll evaluate
 from src.testing.user_agent import user_agent, initialize_user_state
 from src.agent import graph as meal_planning_graph
