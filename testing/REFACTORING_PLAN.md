@@ -40,11 +40,11 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 - [x] Define standard thresholds and scoring logic for global metrics
 - [x] Document what each global metric measures
 
-### Subtask 2.2: Define Task-Specific Success Criteria
-- [ ] Create `TaskCompletion` model for scenario-specific outcomes
-- [ ] Separate domain knowledge (dietary restrictions, nutrition goals) from conversation flow
-- [ ] Update test scenarios to clearly separate global vs specific criteria
-- [ ] Ensure task-specific criteria are measurable and clear
+### Subtask 2.2: Define Task-Specific Success Criteria ✅ COMPLETE
+- [x] Create `TaskCompletion` model for scenario-specific outcomes
+- [x] Separate domain knowledge (dietary restrictions, nutrition goals) from conversation flow
+- [x] Update test scenarios to clearly separate global vs specific criteria
+- [x] Ensure task-specific criteria are measurable and clear
 
 ### Subtask 2.3: Update Validation Logic
 - [ ] Modify validation to score global and task-specific metrics separately

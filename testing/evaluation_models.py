@@ -47,6 +47,60 @@ class ConversationQuality(BaseModel):
     )
 
 
+class NutritionRequirements(BaseModel):
+    """Nutrition-specific evaluation criteria."""
+    
+    calorie_target_met: Optional[bool] = Field(default=None, description="Whether calorie target was achieved")
+    protein_target_met: Optional[bool] = Field(default=None, description="Whether protein target was achieved")
+    carb_target_met: Optional[bool] = Field(default=None, description="Whether carb target was achieved")
+    fat_target_met: Optional[bool] = Field(default=None, description="Whether fat target was achieved")
+    
+    # Detailed nutrition analysis
+    calorie_accuracy: Optional[float] = Field(default=None, description="How close to calorie target (0-1)")
+    macro_balance_score: Optional[float] = Field(default=None, description="How well macros are balanced (0-1)")
+    nutrition_education_provided: Optional[bool] = Field(default=None, description="Whether educational content was included")
+
+
+class DietaryCompliance(BaseModel):
+    """Dietary restriction and preference compliance."""
+    
+    restrictions_respected: Dict[str, bool] = Field(
+        default_factory=dict,
+        description="Whether each dietary restriction was respected"
+    )
+    allergies_avoided: Dict[str, bool] = Field(
+        default_factory=dict, 
+        description="Whether each allergy was properly avoided"
+    )
+    preferences_accommodated: Dict[str, bool] = Field(
+        default_factory=dict,
+        description="Whether user preferences were accommodated"
+    )
+    
+    # Safety and compliance scores
+    safety_score: float = Field(description="Critical safety compliance (allergies, medical) (0-1)")
+    preference_score: float = Field(description="How well preferences were met (0-1)")
+
+
+class MealPlanningSpecifics(BaseModel):
+    """Meal planning domain-specific evaluations."""
+    
+    # Plan structure
+    correct_meal_count: Optional[bool] = Field(default=None, description="Right number of meals generated")
+    appropriate_portions: Optional[bool] = Field(default=None, description="Portions appropriate for family size")
+    timing_considerations: Optional[bool] = Field(default=None, description="Meal timing properly addressed")
+    
+    # Practical considerations  
+    prep_time_realistic: Optional[bool] = Field(default=None, description="Prep times are realistic")
+    cooking_skill_appropriate: Optional[bool] = Field(default=None, description="Recipes match cooking skill level")
+    budget_considerations: Optional[bool] = Field(default=None, description="Budget constraints respected")
+    
+    # Organization and usability
+    shopping_list_complete: Optional[bool] = Field(default=None, description="Shopping list has all ingredients")
+    instructions_clear: Optional[bool] = Field(default=None, description="Instructions are clear and actionable")
+    organization_logical: Optional[bool] = Field(default=None, description="Content is well-organized")
+
+
 class TaskCompletion(BaseModel):
     """Task-specific success metrics that vary by scenario."""
     
@@ -56,23 +110,24 @@ class TaskCompletion(BaseModel):
         description="How well the specific goal was achieved (0-1 scale)"
     )
     
-    # Scenario-specific criteria
-    criteria_results: Dict[str, bool] = Field(
+    # Domain-specific evaluations
+    nutrition: NutritionRequirements = Field(default_factory=NutritionRequirements)
+    dietary_compliance: DietaryCompliance = Field(default_factory=DietaryCompliance)
+    meal_planning: MealPlanningSpecifics = Field(default_factory=MealPlanningSpecifics)
+    
+    # Scenario-specific criteria (for non-standard requirements)
+    custom_criteria_results: Dict[str, bool] = Field(
         default_factory=dict,
-        description="Results for each scenario-specific success criterion"
+        description="Results for scenario-specific custom criteria"
     )
     missing_criteria: List[str] = Field(
         default_factory=list,
-        description="List of unmet scenario-specific requirements"
+        description="List of unmet requirements"
     )
     
-    # Domain-specific analysis
+    # Overall domain score
     domain_specific_score: float = Field(
-        description="Score for domain knowledge (nutrition, dietary restrictions, etc.)"
-    )
-    requirements_met: Dict[str, bool] = Field(
-        default_factory=dict,
-        description="Whether specific requirements were satisfied"
+        description="Overall score for meal planning domain knowledge (0-1)"
     )
 
 
@@ -201,17 +256,166 @@ def determine_recommendation(
         return "fail"
 
 
+def evaluate_nutrition_requirements(
+    conversation_content: str,
+    requirements: Dict[str, Any]
+) -> NutritionRequirements:
+    """Evaluate nutrition-specific requirements from conversation."""
+    
+    nutrition = NutritionRequirements()
+    
+    # Check calorie targets
+    if "calorie_target" in requirements:
+        target = requirements["calorie_target"]
+        # Simple heuristic - look for calorie mentions in bot responses
+        nutrition.calorie_target_met = str(target) in conversation_content.lower()
+        
+    # Check protein targets  
+    if "protein_target" in requirements:
+        target = requirements["protein_target"]
+        nutrition.protein_target_met = f"{target}g" in conversation_content or f"protein" in conversation_content.lower()
+        
+    # Check for nutrition education
+    education_indicators = ["nutrition", "macros", "balanced", "healthy", "vitamins"]
+    nutrition.nutrition_education_provided = any(indicator in conversation_content.lower() for indicator in education_indicators)
+    
+    return nutrition
+
+
+def evaluate_dietary_compliance(
+    conversation_content: str,
+    persona_restrictions: List[str],
+    persona_preferences: List[str]
+) -> DietaryCompliance:
+    """Evaluate dietary restriction and preference compliance."""
+    
+    compliance = DietaryCompliance()
+    
+    # Check restrictions (allergies, medical diets, etc.)
+    for restriction in persona_restrictions:
+        # Look for proper handling of restriction in conversation
+        restriction_mentioned = restriction.lower() in conversation_content.lower()
+        # Simple heuristic - assume compliance if restriction was acknowledged
+        compliance.restrictions_respected[restriction] = restriction_mentioned
+        
+        # Safety-critical restrictions (allergies, medical)
+        if any(term in restriction.lower() for term in ["allergy", "diabetic", "celiac"]):
+            compliance.allergies_avoided[restriction] = restriction_mentioned
+    
+    # Calculate safety score (critical for allergies/medical)
+    safety_items = list(compliance.allergies_avoided.values())
+    compliance.safety_score = sum(safety_items) / len(safety_items) if safety_items else 1.0
+    
+    # Check preferences
+    for preference in persona_preferences:
+        pref_accommodated = preference.lower() in conversation_content.lower()
+        compliance.preferences_accommodated[preference] = pref_accommodated
+    
+    # Calculate preference score
+    pref_items = list(compliance.preferences_accommodated.values())
+    compliance.preference_score = sum(pref_items) / len(pref_items) if pref_items else 1.0
+    
+    return compliance
+
+
+def evaluate_meal_planning_specifics(
+    conversation_content: str,
+    requirements: Dict[str, Any],
+    persona_cooking_skill: str,
+    persona_family_size: int
+) -> MealPlanningSpecifics:
+    """Evaluate meal planning domain-specific criteria."""
+    
+    planning = MealPlanningSpecifics()
+    
+    # Check meal count
+    if "meal_count" in requirements:
+        # Look for appropriate number of meals mentioned
+        planning.correct_meal_count = "meals" in conversation_content.lower()
+    
+    # Check prep time considerations
+    if "max_prep_time" in requirements or "prep_time" in requirements:
+        time_indicators = ["minutes", "prep", "cook time", "preparation"]
+        planning.prep_time_realistic = any(indicator in conversation_content.lower() for indicator in time_indicators)
+    
+    # Check cooking skill appropriateness
+    if persona_cooking_skill == "beginner":
+        complex_indicators = ["advanced", "complex", "difficult"]
+        # Should NOT contain complex indicators for beginners
+        planning.cooking_skill_appropriate = not any(indicator in conversation_content.lower() for indicator in complex_indicators)
+    else:
+        planning.cooking_skill_appropriate = True  # Assume appropriate for non-beginners
+    
+    # Check family size considerations
+    if persona_family_size > 1:
+        family_indicators = ["servings", "portions", "family", str(persona_family_size)]
+        planning.appropriate_portions = any(indicator in conversation_content.lower() for indicator in family_indicators)
+    
+    # Check shopping list completeness
+    if "shopping" in conversation_content.lower() or "ingredients" in conversation_content.lower():
+        planning.shopping_list_complete = True
+    
+    return planning
+
+
+def calculate_domain_specific_score(task_completion: TaskCompletion) -> float:
+    """Calculate overall domain-specific score from all components."""
+    
+    scores = []
+    
+    # Nutrition score (if applicable)
+    nutrition_items = [
+        task_completion.nutrition.calorie_target_met,
+        task_completion.nutrition.protein_target_met,
+        task_completion.nutrition.nutrition_education_provided
+    ]
+    nutrition_items = [item for item in nutrition_items if item is not None]
+    if nutrition_items:
+        nutrition_score = sum(nutrition_items) / len(nutrition_items)
+        scores.append(nutrition_score)
+    
+    # Dietary compliance (critical - weighted more heavily)
+    scores.append(task_completion.dietary_compliance.safety_score * 1.5)  # Safety is critical
+    scores.append(task_completion.dietary_compliance.preference_score)
+    
+    # Meal planning specifics
+    planning_items = [
+        task_completion.meal_planning.correct_meal_count,
+        task_completion.meal_planning.prep_time_realistic,
+        task_completion.meal_planning.cooking_skill_appropriate,
+        task_completion.meal_planning.appropriate_portions
+    ]
+    planning_items = [item for item in planning_items if item is not None]
+    if planning_items:
+        planning_score = sum(planning_items) / len(planning_items)
+        scores.append(planning_score)
+    
+    # Custom criteria
+    if task_completion.custom_criteria_results:
+        custom_score = sum(task_completion.custom_criteria_results.values()) / len(task_completion.custom_criteria_results)
+        scores.append(custom_score)
+    
+    return sum(scores) / len(scores) if scores else 0.0
+
+
 # Default thresholds instance
 DEFAULT_THRESHOLDS = EvaluationThresholds()
 
 __all__ = [
     "ConversationQuality",
     "TaskCompletion", 
+    "NutritionRequirements",
+    "DietaryCompliance", 
+    "MealPlanningSpecifics",
     "EvaluationThresholds",
     "CombinedEvaluation",
     "calculate_efficiency_score",
     "calculate_clarity_score", 
     "calculate_overall_score",
     "determine_recommendation",
+    "evaluate_nutrition_requirements",
+    "evaluate_dietary_compliance",
+    "evaluate_meal_planning_specifics", 
+    "calculate_domain_specific_score",
     "DEFAULT_THRESHOLDS"
 ] 
