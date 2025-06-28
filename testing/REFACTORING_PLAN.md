@@ -25,11 +25,11 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 - [x] Simplify end-of-conversation detection
 - [x] Replace hardcoded string patterns with LLM-based evaluation (goal achievement & end detection)
 
-### Subtask 1.4: Update User Agent Graph
-- [ ] Simplify the LangGraph nodes and edges
-- [ ] Remove unnecessary state update functions
-- [ ] Streamline the conversation flow logic
-- [ ] Test that basic scenarios still work with simplified agent
+### Subtask 1.4: Update User Agent Graph ✅ COMPLETE
+- [x] Simplify the LangGraph nodes and edges (2 nodes → 1 node)
+- [x] Remove unnecessary state update functions (combined into single function)
+- [x] Streamline the conversation flow logic (single process_turn function)
+- [x] Test that basic scenarios still work with simplified agent (test file created)
 
 ## Task 2: Separate Global vs Task-Specific Metrics 📊
 **Goal**: Clearly distinguish between universal conversation quality metrics and scenario-specific success criteria.
