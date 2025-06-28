@@ -49,9 +49,11 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 - [x] Move scenarios to YAML for cleaner data/code separation
 - [x] Create scenario loader for backward compatibility
 
-### Subtask 2.3: Update Validation Logic
-- [ ] Modify validation to score global and task-specific metrics separately
-- [ ] Create combined scoring logic that weights both appropriately
+### Subtask 2.3: Update Validation Logic ✅ COMPLETE
+- [x] Modify validation to score global and task-specific metrics separately
+- [x] Create combined scoring logic that weights both appropriately
+- **Updated**: `validation_agent.py` with new evaluation models integration
+- **Key Features**: Separate conversation quality vs task completion analysis, LLM-based evaluation
 
 ## Task 3: Focus on Core Scenarios (80/20 Rule) 🎯
 **Goal**: Identify and prioritize the 20% of scenarios that catch 80% of issues.
@@ -77,11 +79,13 @@ Refactor the testing framework to be simpler, more maintainable, and better suit
 ## Task 4: Migrate to LangSmith Evaluation Framework 🔄
 **Goal**: Move evaluation logic from custom validation agent to LangSmith's built-in tools.
 
-### Subtask 4.1: Set Up LangSmith Datasets
-- [ ] Create LangSmith datasets for different scenario types
-- [ ] Upload core scenarios as LangSmith examples
-- [ ] Set up proper tagging and metadata for scenarios
-- [ ] Test dataset creation and retrieval workflows
+### Subtask 4.1: Set Up LangSmith Datasets ✅ COMPLETE
+- [x] Create LangSmith datasets for different scenario types
+- [x] Upload core scenarios as LangSmith examples
+- [x] Set up proper tagging and metadata for scenarios
+- [x] Test dataset creation and retrieval workflows
+- **Files Created**: `langsmith_integration.py`, `example_langsmith_setup.py`
+- **Key Features**: Automated YAML→LangSmith conversion, category/complexity tagging, safety-critical flagging
 
 ### Subtask 4.2: Create LangSmith Evaluators
 - [ ] Convert global conversation quality metrics to LangSmith evaluators
