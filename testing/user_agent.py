@@ -138,7 +138,7 @@ def check_conversation_end(state: UserState, config: UserAgentConfig) -> tuple[b
             if isinstance(msg, HumanMessage):
                 last_user_msg = msg.content
                 break
-        
+            
         if last_user_msg:
             anthropic_key = os.getenv("ANTHROPIC_KEY") or os.getenv("ANTHROPIC_API_KEY")
             llm = ChatAnthropic(model=config.model, temperature=0.3, api_key=anthropic_key)
